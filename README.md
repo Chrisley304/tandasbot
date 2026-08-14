@@ -1,6 +1,6 @@
 <p align="center">
   <picture>
-    <img src="https://img.icons8.com/wired/128/split-transaction.png" height="120" alt="Tandas Bot Logo">
+    <img src="./src/assets/tandasbot.jpeg" height="120" alt="Tandas Bot Logo">
   </picture>
   <h1 align="center">Tandas Bot</h1>
   <p align="center">
