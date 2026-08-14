@@ -1,0 +1,61 @@
+import { createFlow } from "@builderbot/bot";
+
+import { menuFlow } from "./generalFlow";
+import {
+    messageToGroupHandler,
+    sendMessageToGroupFlow,
+    getTandasStatusFlow,
+    sendMessageToUserFlow,
+    sendMessageToUserHandler,
+    sendDailyRemindersFlow,
+} from "./adminFlow";
+import {
+    amazonPrimeStatusFlow,
+    chrisPaymentInfoFlow,
+    maxStatusFlow,
+    registerSpotifyPayment,
+    spotifyPaymentHandler,
+    spotifyStatusFlow,
+    maxPaymentHandler,
+    registerMaxPayment,
+    acceptTermsHandler,
+    spotifyRulesFlow,
+    maxRulesFlow,
+    amazonPrimeRulesFlow,
+    registerAmazonPayment,
+    amazonPaymentHandler,
+    youtubeRulesFlow,
+    youtubePremiumStatusFlow,
+    youtubePremiumPaymentHandler,
+    registerYoutubePremiumPayment,
+} from "./tandasFlow";
+import { aiFlow } from "./aiFlow";
+
+export const flow = createFlow([
+    aiFlow,
+    menuFlow,
+    sendMessageToGroupFlow,
+    messageToGroupHandler,
+    spotifyStatusFlow,
+    maxStatusFlow,
+    amazonPrimeStatusFlow,
+    chrisPaymentInfoFlow,
+    spotifyPaymentHandler,
+    registerSpotifyPayment,
+    maxPaymentHandler,
+    registerMaxPayment,
+    getTandasStatusFlow,
+    acceptTermsHandler,
+    spotifyRulesFlow,
+    maxRulesFlow,
+    amazonPrimeRulesFlow,
+    sendMessageToUserFlow,
+    sendMessageToUserHandler,
+    registerAmazonPayment,
+    amazonPaymentHandler,
+    youtubeRulesFlow,
+    youtubePremiumStatusFlow,
+    youtubePremiumPaymentHandler,
+    registerYoutubePremiumPayment,
+    sendDailyRemindersFlow,
+]);
