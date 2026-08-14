@@ -12,3 +12,5 @@ node_modules
 db.json
 
 vouchers
+
+.DS_Store
