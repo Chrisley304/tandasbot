@@ -14,3 +14,7 @@ db.json
 vouchers
 
 .DS_Store
+
+# Github Spec Kit Installation
+.agents/skills/speckit-*
+.specify
