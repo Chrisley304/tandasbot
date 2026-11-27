@@ -174,7 +174,7 @@ export const sendReminderToDebtors = async (
                 case 5:
                     messages.push(
                         {
-                            body: `Hola ${debtor.user.name} 👋🏼! Acá ChrisBot recordándote que esta semana debes pagar tu parte de *${toTitleCase(tanda.name)}* (${amountSummary} 😉).`,
+                            body: `Hola ${debtor.user.name} 👋🏼! Acá Tandasbot recordándote que esta semana debes pagar tu parte de *${toTitleCase(tanda.name)}* (${amountSummary} 😉).`,
                         },
                         {
                             body: `👀 Psst: Envía *pagar ${tanda.name.toLowerCase()}* para registrar tu comprobante correctamente 🤩.\n\n${SUSPENSION_WARNING}`,
@@ -188,7 +188,7 @@ export const sendReminderToDebtors = async (
                             body: `Hola de nuevo 😅, te recuerdo que en 3 días es la fecha límite de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary}.`,
                         },
                         {
-                            body: `Recuerda que puedes enviar \`datos de pago\` para ver mis datos bancarios 🤓.\n\n${SUSPENSION_WARNING}`,
+                            body: `Recuerda que puedes enviar \`datos de pago\` para ver los datos bancarios de pago 🤓.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -199,7 +199,7 @@ export const sendReminderToDebtors = async (
                             body: `Jeloou 👀... Mañana es la fecha límite de pago de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary} 🥹.`,
                         },
                         {
-                            body: `Si tienes alguna situación que te impida realizar el pago a tiempo, avísame a mi número personal 🙏🏼.\n\n${SUSPENSION_WARNING}`,
+                            body: `Si tienes alguna situación que te impida realizar el pago a tiempo, avisa al administrador de tu tanda 🙏🏼.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -221,7 +221,7 @@ export const sendReminderToDebtors = async (
                             body: `Hola ${debtor.user.name}, hace 2 días venció la fecha de pago de *${toTitleCase(tanda.name)}* y aún tienes *${debtor.missingPayments} ${debtor.missingPayments === 1 ? periodWord : periodPlural}* pendiente(s) por un total de ${amountSummary} 😕.`,
                         },
                         {
-                            body: `Registra tu comprobante con *pagar ${tanda.name.toLowerCase()}* o escríbeme a mi número personal si ya pagaste.\n\n${SUSPENSION_WARNING}`,
+                            body: `Registra tu comprobante con *pagar ${tanda.name.toLowerCase()}* o contacta al administrador de tu tanda si ya pagaste.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -234,7 +234,7 @@ export const sendReminderToDebtors = async (
                 case 30:
                     messages.push(
                         {
-                            body: `Hola ${debtor.user.name} 👋🏼! Acá ChrisBot recordándote que este mes toca tu pago *anual* de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary} 😉.`,
+                            body: `Hola ${debtor.user.name} 👋🏼! Acá Tandasbot recordándote que este mes toca tu pago *anual* de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary} 😉.`,
                         },
                         {
                             body: `👀 Envía *pagar ${tanda.name.toLowerCase()}* para registrar tu comprobante 🤩.\n\n${SUSPENSION_WARNING}`,
@@ -248,7 +248,7 @@ export const sendReminderToDebtors = async (
                             body: `Hola de nuevo ${debtor.user.name} 😅, te recuerdo que en 15 días vence tu parte anual de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary}.`,
                         },
                         {
-                            body: `Puedes enviar \`datos de pago\` para ver mis datos bancarios 🤓.\n\n${SUSPENSION_WARNING}`,
+                            body: `Puedes enviar \`datos de pago\` para ver los datos bancarios de pago 🤓.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -259,7 +259,7 @@ export const sendReminderToDebtors = async (
                             body: `Jeje otra vez yo 😅, en una semana vence tu parte anual de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary} 💵.`,
                         },
                         {
-                            body: `Si ya no deseas continuar en el servicio, avísame a mi número personal 🤓.\n\n${SUSPENSION_WARNING}`,
+                            body: `Si ya no deseas continuar en el servicio, avisa al administrador de tu tanda 🤓.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -270,7 +270,7 @@ export const sendReminderToDebtors = async (
                             body: `Jeloou 👀... Mañana vence el pago anual de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary} 🥹.`,
                         },
                         {
-                            body: `Si tienes algún inconveniente, avísame a mi número personal 🙏🏼.\n\n${SUSPENSION_WARNING}`,
+                            body: `Si tienes algún inconveniente, avisa al administrador de tu tanda 🙏🏼.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -292,7 +292,7 @@ export const sendReminderToDebtors = async (
                             body: `Hola ${debtor.user.name}, hace 2 días venció la fecha de pago de *${toTitleCase(tanda.name)}* y tienes pendiente un total de ${amountSummary} 😕.`,
                         },
                         {
-                            body: `Registra tu comprobante con *pagar ${tanda.name.toLowerCase()}* o escríbeme a mi número personal si ya pagaste.\n\n${SUSPENSION_WARNING}`,
+                            body: `Registra tu comprobante con *pagar ${tanda.name.toLowerCase()}* o contacta al administrador de tu tanda si ya pagaste.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;

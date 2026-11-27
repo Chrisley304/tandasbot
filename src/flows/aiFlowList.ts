@@ -12,7 +12,7 @@ import {
     userDebtLookupFlow,
 } from "./adminFlow";
 import {
-    chrisPaymentInfoFlow,
+    tandaPaymentInfoFlow,
     tandaPaymentEntryFlow,
     tandaRulesFlow,
     tandaStatusFlow,
@@ -35,7 +35,7 @@ export const getFlowByCommandName = (
         case "menu":
             return { flow: menuFlow };
         case BOT_COMMANDS.PAYMENT_DETAILS:
-            return { flow: chrisPaymentInfoFlow };
+            return { flow: tandaPaymentInfoFlow };
         case BOT_COMMANDS.SEND_GROUP_MESSAGE:
             return { flow: sendMessageToGroupFlow };
         case BOT_COMMANDS.SEND_CUSTOM_MESSAGE:
@@ -44,7 +44,7 @@ export const getFlowByCommandName = (
             return { flow: getTandasStatusFlow };
         case BOT_COMMANDS.RESEND_TANDA_REMINDERS:
             return { flow: sendDailyRemindersFlow };
-        case BOT_COMMANDS.USER_DEBTS:
+        case BOT_COMMANDS.USER_STATUS:
             return { flow: userDebtLookupFlow };
         case BOT_COMMANDS.CHANGE_TANDA_PRICE:
             return { flow: changeTandaPriceFlow };

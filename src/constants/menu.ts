@@ -2,7 +2,7 @@ import type { Tanda } from "@custom-types/notion/tandasDB";
 import type { User } from "@custom-types/notion/usersDB";
 
 export const GENERAL_MENU_OPTIONS = [
-    "- `datos de pago` - Mostrar mis datos de pago 📄",
+    "- `datos de pago` - Ver los datos para pagar tu tanda 📄",
 ];
 
 export const ADMIN_MENU_OPTIONS = [
@@ -10,7 +10,7 @@ export const ADMIN_MENU_OPTIONS = [
     "- `mensaje personalizado` - Envia un mensaje personalizado a un usuario 📩",
     '- `estatus tandas` - Muestra el estatus de las "tandas" 💸',
     "- `reenviar recordatorios tandas` - Reenvia el recordatorio diario de las tandas a los usuarios 📢",
-    "- `adeudos usuario` - Consulta los últimos 3 pagos, saldo a favor y adeudo de un usuario 🔍",
+    "- `estatus usuario` - Consulta los últimos 3 pagos, saldo a favor y adeudo de un usuario 🔍",
     "- `cambiar precio tanda` - Actualiza el costo de una tanda y ajusta pagos adelantados 💲",
     "- `cambiar contraseña tanda` - Cambia la contraseña de una tanda y avisa a quienes están al corriente 🔐",
 ];

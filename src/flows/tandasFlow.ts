@@ -1,5 +1,5 @@
 import { addKeyword, EVENTS } from "@builderbot/bot";
-import type { BotContext } from "@builderbot/bot/dist/types";
+import type { BotContext, BotStateStandAlone } from "@builderbot/bot/dist/types";
 import { JsonFileDB as Database } from "@builderbot/database-json";
 import { BaileysProvider as Provider } from "@builderbot/provider-baileys";
 
@@ -36,10 +36,12 @@ import logger from "@utils/logger";
 
 const extractTandaFromCommandOrState = async (
     ctx: BotContext,
-    state: { get: <T = unknown>(key: string) => T },
+    state: Pick<BotStateStandAlone, "get">,
     prefixRegex: RegExp,
 ): Promise<Tanda | null> => {
-    const stateTandaName = state.get<string | undefined>("selectedTandaName");
+    const stateTandaName = await state.get<string | undefined>(
+        "selectedTandaName",
+    );
     if (stateTandaName) {
         return getTandaByName(stateTandaName);
     }
@@ -52,7 +54,7 @@ const extractTandaFromCommandOrState = async (
     return null;
 };
 
-export const chrisPaymentInfoFlow = addKeyword<Provider, Database>(
+export const tandaPaymentInfoFlow = addKeyword<Provider, Database>(
     BOT_COMMANDS.PAYMENT_DETAILS,
 ).addAction(async (ctx, { flowDynamic, provider }) => {
     try {
@@ -61,7 +63,7 @@ export const chrisPaymentInfoFlow = addKeyword<Provider, Database>(
 
             if (isUserAllowed(user)) {
                 const messages: string[] = [
-                    "📄 Mis datos de pago:",
+                    "📄 *Datos de pago para tu tanda:*",
                     "👤 *Nombre*: Christian Alejandro Leyva Mercado",
                     "🏦 *Banco*: NU MEXICO",
                     "🔑 *CLABE*: 6381 8000 0110 380148",
@@ -84,7 +86,7 @@ export const acceptTermsHandler = addKeyword<Provider, Database>(EVENTS.ACTION)
     })
     .addAnswer(
         withCancelInstruction(
-            "Para aceptar el reglamento, escribe *ACEPTO*. De lo contrario, envía *NO ACEPTO* y contacta con mi número personal para aclarar dudas.",
+            "Para aceptar el reglamento, escribe *ACEPTO*. De lo contrario, envía *NO ACEPTO* y contacta al administrador de tu tanda para aclarar dudas.",
         ),
         { capture: true },
         async (ctx, { flowDynamic, fallBack, endFlow, state, provider }) => {
@@ -99,7 +101,7 @@ export const acceptTermsHandler = addKeyword<Provider, Database>(EVENTS.ACTION)
             if (userResponse.toUpperCase() === "NO ACEPTO") {
                 await state.clear();
                 return endFlow(
-                    "Entendido, si tienes alguna duda por favor contáctame a mi número personal.",
+                    "Entendido, si tienes alguna duda contacta al administrador de tu tanda.",
                 );
             }
 
@@ -114,8 +116,12 @@ export const acceptTermsHandler = addKeyword<Provider, Database>(EVENTS.ACTION)
             try {
                 await withTyping(ctx, provider, async () => {
                     const user = await resolveUserFromContext(ctx);
-                    const tandaId = state.get<string>("tandaIdToAcceptTerms");
-                    const tandaName = state.get<string>("tandaToAcceptTerms");
+                    const tandaId = await state.get<string>(
+                        "tandaIdToAcceptTerms",
+                    );
+                    const tandaName = await state.get<string>(
+                        "tandaToAcceptTerms",
+                    );
 
                     if (!user || !tandaId || !tandaName) {
                         await flowDynamic(GENERIC_ERROR_MESSAGE);
@@ -204,8 +210,10 @@ export const tandaPaymentHandler = addKeyword<Provider, Database>(EVENTS.ACTION)
             try {
                 await withTyping(ctx, provider, async () => {
                     const user = await resolveUserFromContext(ctx);
-                    const tandaName = state.get<string>("paymentTandaName");
-                    const amount = state.get<number>("amount");
+                    const tandaName = await state.get<string>(
+                        "paymentTandaName",
+                    );
+                    const amount = await state.get<number>("amount");
 
                     if (!user || !tandaName || !amount) {
                         await flowDynamic(GENERIC_ERROR_MESSAGE);
@@ -282,7 +290,7 @@ export const tandaPaymentHandler = addKeyword<Provider, Database>(EVENTS.ACTION)
     );
 
 export const tandaPaymentEntryFlow = addKeyword<Provider, Database>(
-    "^pagar\\s+(.+)$",
+    "/^pagar\\s+(.+)$/i",
     { regex: true },
 ).addAction(async (ctx, { flowDynamic, gotoFlow, state, provider }) => {
     try {
@@ -325,7 +333,7 @@ export const tandaPaymentEntryFlow = addKeyword<Provider, Database>(
 });
 
 export const tandaStatusFlow = addKeyword<Provider, Database>(
-    "^mi\\s+(.+)$",
+    "/^mi\\s+(.+)$/i",
     { regex: true },
 ).addAction(async (ctx, { flowDynamic, state, provider }) => {
     try {
@@ -431,7 +439,7 @@ export const tandaStatusFlow = addKeyword<Provider, Database>(
 });
 
 export const tandaRulesFlow = addKeyword<Provider, Database>(
-    "^reglamento\\s+(.+)$",
+    "/^reglamento\\s+(.+)$/i",
     { regex: true },
 ).addAction(async (ctx, { flowDynamic, gotoFlow, state, provider }) => {
     try {

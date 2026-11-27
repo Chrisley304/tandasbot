@@ -28,7 +28,7 @@ Resueltos dinámicamente por prefijo + nombre normalizado de tanda:
 - `mensaje personalizado`: Selecciona usuario destino y envía mensaje directo.
 - `estatus tandas`: Resumen general de todas las tandas activas, deudores, montos pendientes y dinero recaudado.
 - `reenviar recordatorios tandas`: Ejecuta manualmente el envío de recordatorios diarios (incluyendo el aviso de suspensión definitiva por falta de pago).
-- `adeudos usuario` *(Nuevo)*: Solicita seleccionar/buscar usuario y muestra por cada tanda asignada sus últimos 3 pagos (fecha, monto, periodos), su saldo a favor actual, periodos pendientes y monto total adeudado.
+- `estatus usuario` *(Nuevo)*: Solicita seleccionar/buscar usuario y muestra por cada tanda asignada sus últimos 3 pagos (fecha, monto, periodos), su saldo a favor actual, periodos pendientes y monto total adeudado.
 - `cambiar precio tanda` *(Nuevo)*: Solicita seleccionar tanda y nuevo costo total (`Costo tanda`); actualiza Notion, recalcula pagos adelantados vigentes y saldo a favor de los miembros afectados, y muestra resumen al admin.
 - `cambiar contraseña tanda` *(Nuevo)*: Solicita seleccionar tanda y nueva contraseña; actualiza `"password"` en Notion, envía la nueva contraseña únicamente a miembros sin adeudos, e informa al admin quién la recibió y quién no.
 

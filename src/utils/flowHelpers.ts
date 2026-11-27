@@ -34,24 +34,32 @@ export const withTyping = async <T>(
     fn: () => Promise<T>,
 ): Promise<T> => {
     const jid = ctx.key?.remoteJid;
-    if (jid && provider?.vendor?.sendPresenceUpdate) {
-        try {
-            await provider.vendor.sendPresenceUpdate("composing", jid);
-        } catch (error) {
-            logger.debug(`Could not send composing presence: ${String(error)}`);
+    const sendPresence = async (presence: "composing" | "paused") => {
+        if (!jid || !provider?.vendor?.sendPresenceUpdate) {
+            return;
         }
-    }
+
+        try {
+            await provider.vendor.sendPresenceUpdate(presence, jid);
+        } catch (error) {
+            logger.debug(
+                `Could not send ${presence} presence: ${String(error)}`,
+            );
+        }
+    };
+
+    await sendPresence("composing");
+    // WhatsApp clears the composing indicator after a few seconds. Refresh it
+    // while lengthy operations (such as the full tanda-status report) run.
+    const typingHeartbeat = setInterval(() => {
+        void sendPresence("composing");
+    }, 8_000);
 
     try {
         return await fn();
     } finally {
-        if (jid && provider?.vendor?.sendPresenceUpdate) {
-            try {
-                await provider.vendor.sendPresenceUpdate("paused", jid);
-            } catch (error) {
-                logger.debug(`Could not send paused presence: ${String(error)}`);
-            }
-        }
+        clearInterval(typingHeartbeat);
+        await sendPresence("paused");
     }
 };
 

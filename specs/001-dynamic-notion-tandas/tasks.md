@@ -137,7 +137,7 @@ description: "Task list for 001-dynamic-notion-tandas implementation"
 
 ## Phase 9: User Story 6 - Comandos Administrativos Nuevos y Broadcast `"todos"` (Priority: P3)
 
-**Goal**: Implementar comandos de admin: `adeudos usuario`, `cambiar precio tanda` (con ajuste de adelantados), `cambiar contraseña tanda` (con envío solo a miembros sin adeudos y reporte) y soporte de `"todos"` en `mensaje a grupo`.
+**Goal**: Implementar comandos de admin: `estatus usuario`, `cambiar precio tanda` (con ajuste de adelantados), `cambiar contraseña tanda` (con envío solo a miembros sin adeudos y reporte) y soporte de `"todos"` en `mensaje a grupo`.
 
 **Independent Test**: Ejecutar como admin cada uno de los 4 flujos y verificar reporte de últimos 3 pagos + saldo + adeudo, recalculo de adelantados tras cambio de precio, entrega selectiva de contraseña nueva y difusión sin duplicados con `"todos"`.
 

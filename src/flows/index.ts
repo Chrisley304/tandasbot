@@ -17,7 +17,7 @@ import {
 } from "./adminFlow";
 import {
     acceptTermsHandler,
-    chrisPaymentInfoFlow,
+    tandaPaymentInfoFlow,
     tandaPaymentEntryFlow,
     tandaPaymentHandler,
     tandaRulesFlow,
@@ -30,7 +30,7 @@ export const flow = createFlow([
     aiFlow,
     idleFlow,
     menuFlow,
-    chrisPaymentInfoFlow,
+    tandaPaymentInfoFlow,
     tandaPaymentEntryFlow,
     tandaPaymentHandler,
     tandaStatusFlow,

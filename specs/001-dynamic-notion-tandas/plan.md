@@ -70,7 +70,7 @@ src/
 │   ├── aiFlow.ts             # Debounce (fast-entries) + typing + prompt dinámico
 │   ├── aiFlowList.ts         # Resolución dinámica de comando -> flujo + estado
 │   ├── generalFlow.ts        # Menú dinámico
-│   ├── adminFlow.ts          # Difusión (incl. "todos"), estatus, adeudos usuario, precio, password, cron
+│   ├── adminFlow.ts          # Difusión (incl. "todos"), estatus de usuario, precio, password, cron
 │   ├── tandasFlow.ts         # 3 flujos genéricos (pagar, mi <tanda>, reglamento <tanda>) + idle + cancel
 │   └── idleFlow.ts           # Temporizador de inactividad de 5 minutos
 ├── types/

@@ -100,7 +100,7 @@ export const messageToGroupHandler = addKeyword(EVENTS.ACTION)
             stopIdle(ctx);
             try {
                 await withTyping(ctx, provider, async () => {
-                    const groupName = state.get<string>("groupName");
+                    const groupName = await state.get<string>("groupName");
                     const { sentCount, targetLabel } =
                         await sendMessageToTandaGroup(groupName, message);
                     await state.clear();
@@ -189,7 +189,7 @@ export const sendMessageToUserHandler = addKeyword(EVENTS.ACTION)
             stopIdle(ctx);
             try {
                 await withTyping(ctx, provider, async () => {
-                    const targetUser = state.get<User>("userToSendMsg");
+                    const targetUser = await state.get<User>("userToSendMsg");
                     await sendMessagesToUser(targetUser, [{ body: message }]);
                     await state.clear();
                     await flowDynamic(
@@ -346,7 +346,7 @@ export const userDebtLookupHandler = addKeyword(EVENTS.ACTION)
     );
 
 export const userDebtLookupFlow = addKeyword<Provider, Database>(
-    [BOT_COMMANDS.USER_DEBTS],
+    [BOT_COMMANDS.USER_STATUS],
     { sensitive: true },
 ).addAction(async (ctx, { flowDynamic, gotoFlow, provider }) => {
     try {
@@ -426,7 +426,7 @@ export const changeTandaPriceHandler = addKeyword(EVENTS.ACTION)
             stopIdle(ctx);
             try {
                 await withTyping(ctx, provider, async () => {
-                    const tandaId = state.get<string>("priceTandaId");
+                    const tandaId = await state.get<string>("priceTandaId");
                     const result = await adjustTandaPriceAndAdvancePayments(
                         tandaId,
                         newTotalCost,
@@ -532,7 +532,7 @@ export const changeTandaPasswordHandler = addKeyword(EVENTS.ACTION)
             stopIdle(ctx);
             try {
                 await withTyping(ctx, provider, async () => {
-                    const tandaId = state.get<string>("passwordTandaId");
+                    const tandaId = await state.get<string>("passwordTandaId");
                     const result = await updateTandaPasswordAndNotify(
                         tandaId,
                         newPassword,

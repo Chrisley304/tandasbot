@@ -6,7 +6,7 @@ Este documento proporciona una guía completa y estructurada sobre la arquitectu
 
 ## 1. Visión General del Proyecto
 
-**TandasBot** es un bot de WhatsApp creado por Christian Leyva (@chrisley.dev) para administrar y automatizar el cobro de suscripciones compartidas ("tandas") entre amigos y familiares. El catálogo de tandas de Notion es la fuente de verdad; no hay servicios fijos en el código.
+**Tandasbot** es un bot de WhatsApp para administrar y automatizar el cobro de suscripciones compartidas ("tandas"). El catálogo de tandas de Notion es la fuente de verdad; no hay servicios fijos en el código ni utilidades personales ajenas a las tandas.
 
 ### Capacidades principales:
 1. **Atención Conversacional con IA**: Integra Google Gemini (`@google/genai`) para responder dudas en lenguaje natural con personalidad personalizada y dirigir al usuario al flujo correcto.
@@ -24,9 +24,9 @@ Este documento proporciona una guía completa y estructurada sobre la arquitectu
 | **Runtime** | Node.js | v20+ (ESM nativo, `"type": "module"`) |
 | **Lenguaje** | TypeScript | v5.4.3 (Target ES2022) |
 | **Gestor de Paquetes** | pnpm | Obligatorio (usado en Docker y local) |
-| **Bot Framework** | BuilderBot (`@builderbot/bot`) | v1.3.15 |
-| **WhatsApp Provider** | `@builderbot/provider-baileys` | v1.3.15 (Baileys) |
-| **Bot State DB** | `@builderbot/database-json` | v1.3.15 (`db.json`) |
+| **Bot Framework** | BuilderBot (`@builderbot/bot`) | v1.5.2 |
+| **WhatsApp Provider** | `@builderbot/provider-baileys` | v1.5.2 (Baileys) |
+| **Bot State DB** | `@builderbot/database-json` | v1.5.2 (`db.json`) |
 | **Database Principal** | Notion SDK (`@notionhq/client`) | v5.3.0 (API de DataSources y FileUploads) |
 | **Motor de IA** | Google Gen AI SDK (`@google/genai`) | v1.52.0 (configurado vía env) |
 | **Scheduler** | `node-cron` | v4.6.0 |
@@ -51,7 +51,7 @@ tandasbot/
 ├── src/
 │   ├── app.ts                # Punto de entrada principal y configuración del cron diario
 │   ├── config/
-│   │   ├── aiContext.md      # Instrucciones de sistema y personalidad del bot (ChrisBot)
+│   │   ├── aiContext.md      # Instrucciones de sistema y personalidad de Tandasbot
 │   │   ├── aiModel.ts        # Inicialización de Gemini y esquema de respuesta JSON
 │   │   ├── database.ts       # Inicialización de JsonFileDB de BuilderBot
 │   │   └── provider.ts       # Versión más reciente de WhatsApp Web y configuración del provider
@@ -125,8 +125,8 @@ Gemini siempre responde un objeto JSON validado por esquema:
 ```
 
 ### Comandos soportados (`src/enums/bot-commands.ts`)
-- **Generales**: `menú`, `menu`, `datos de pago`.
-- **Admin**: `mensaje a grupo`, `mensaje personalizado`, `estatus tandas`, `reenviar recordatorios tandas`, `adeudos usuario`, `cambiar precio tanda`, `cambiar contraseña tanda`.
+- **Generales**: `menú`, `menu`, `datos de pago` (exclusivamente para pagos de tandas).
+- **Admin**: `mensaje a grupo`, `mensaje personalizado`, `estatus tandas`, `reenviar recordatorios tandas`, `estatus usuario`, `cambiar precio tanda`, `cambiar contraseña tanda`.
 - **Por tanda**: `pagar <tanda>`, `mi <tanda>`, `reglamento <tanda>`. Se resuelven mediante el nombre normalizado de una tanda activa de Notion.
 
 ---
