@@ -1,13 +1,13 @@
 #!/bin/bash
 
-cd ~/Documents/chrisbot-whatsapp/
+cd ~/Documents/tandasbot/
 git fetch origin main
 if [ "$(git rev-parse HEAD)" != "$(git rev-parse @{u})" ]; then
     git pull origin main
-    npm install
-    npm run build
-    pm2 restart chrisbot
-    echo "Bot updated and restarted."
+    pnpm install
+    pnpm build
+    pm2 restart tandasbot
+    echo "Tandasbot updated and restarted."
 else
     echo "No new changes."
 fi

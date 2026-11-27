@@ -1,6 +1,6 @@
-dist
-node_modules
-.env
+dist/
+node_modules/
+.env*
 
 *_sessions
 *tokens
@@ -14,3 +14,11 @@ db.json
 vouchers
 
 .DS_Store
+*.tmp
+*.swp
+.vscode/
+.idea/
+
+# Github Spec Kit Installation
+.agents/skills/speckit-*
+.specify

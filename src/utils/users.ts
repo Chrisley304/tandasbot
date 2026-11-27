@@ -1,47 +1,36 @@
 import type { Deptor } from "@custom-types/debtors";
+import type { Message } from "@custom-types/messages";
+import type { Tanda } from "@custom-types/notion/tandasDB";
+import type { User } from "@custom-types/notion/usersDB";
 
-import { USER_GROUPS } from "@enums/users";
-import { User } from "@custom-types/notion/usersDB";
-import { getUsersFromGroup } from "./notion/usersDB";
 import { provider } from "@config/provider";
-import { Tanda } from "@custom-types/notion/tandasDB";
-import { textToPascalCase, toTitleCase } from "./misc";
-import { Message } from "@custom-types/messages";
+import { SUSCRIPTION_TYPES } from "@enums/suscriptions";
+import { getUserTandaLegal } from "./notion/legalsDB";
+import { getActiveTandas, getTandaByName } from "./notion/tandasDB";
+import { getAdminUsers, getUsersByTandaId } from "./notion/usersDB";
+import { normalizeTandaName, pesosFormatter, toTitleCase } from "./misc";
 import logger from "./logger";
+
+const SUSPENSION_WARNING =
+    "⚠️ Recuerda que dejar de pagar resultará en la *suspensión definitiva* de tu servicio.";
 
 export const isUserAllowed = (
     user: User | null,
-    requiredRoles: USER_GROUPS[],
+    options?: { requireAdmin?: boolean; tandaId?: string },
 ): boolean => {
     if (!user) {
         return false;
     }
 
-    if (requiredRoles.includes(USER_GROUPS.ALL) && user.groups.length > 0) {
-        return true;
+    if (options?.requireAdmin) {
+        return user.isAdmin;
     }
 
-    return requiredRoles.some((role) => user.groups.includes(role));
-};
-
-export const sendMessageToUserGroup = async (
-    groupName: string,
-    message: string,
-): Promise<void> => {
-    try {
-        const users = await getUsersFromGroup(groupName);
-
-        users.forEach((user) => {
-            const userPhone = "+" + user.phone;
-            provider.sendMessage(userPhone, message, {});
-        });
-    } catch (error) {
-        logger.error(
-            `Error al enviar mensaje a grupo de usuarios ${groupName}: ${String(
-                error,
-            )}`,
-        );
+    if (options?.tandaId) {
+        return user.isAdmin || user.tandaIds.includes(options.tandaId);
     }
+
+    return user.isAdmin || user.tandaIds.length > 0;
 };
 
 export const sendMessagesToUser = async (
@@ -49,8 +38,16 @@ export const sendMessagesToUser = async (
     messages: Message[],
 ): Promise<void> => {
     try {
+        if (!user.phone || user.phone.length < 10) {
+            logger.warn(
+                { event: "message.send.skipped", userId: user.id, reason: "invalid_phone" },
+                "Message was not sent because the recipient has an invalid phone",
+            );
+            return;
+        }
+
         const userPhone = "+" + user.phone;
-        await messages.forEach(async (message) => {
+        for (const message of messages) {
             if (!message.type || message.type === "text") {
                 await provider.sendMessage(userPhone, message.body, {});
             } else if (message.type === "image") {
@@ -60,31 +57,104 @@ export const sendMessagesToUser = async (
                     message.alt || "",
                 );
             }
-        });
+        }
+        logger.debug(
+            { event: "message.send.completed", userId: user.id, messages: messages.length },
+            "Message delivery completed",
+        );
     } catch (error) {
         logger.error(
-            `Error al enviar mensaje a ${user.name}: ${String(error)}`,
+            { err: error, event: "message.send.failed", userId: user.id },
+            "Could not send message to user",
         );
     }
 };
 
-export const sendMessagesToProvidedUsers = (
+export const sendMessagesToAdmins = async (
+    messages: Message[],
+): Promise<void> => {
+    try {
+        const admins = await getAdminUsers();
+        if (admins.length === 0) {
+            logger.warn(
+                'No users with "Admin?" = true found in Notion; skipping admin notification.',
+            );
+            return;
+        }
+
+        for (const admin of admins) {
+            await sendMessagesToUser(admin, messages);
+        }
+    } catch (error) {
+        logger.error(
+            { err: error, event: "message.admin-notification.failed" },
+            "Could not send notification to administrators",
+        );
+    }
+};
+
+export const sendMessageToTandaGroup = async (
+    targetGroupName: string,
+    message: string,
+): Promise<{ sentCount: number; targetLabel: string }> => {
+    const normalized = normalizeTandaName(targetGroupName);
+
+    if (normalized === "todos") {
+        const activeTandas = await getActiveTandas();
+        const uniqueUsers = new Map<string, User>();
+
+        for (const tanda of activeTandas) {
+            const members = await getUsersByTandaId(tanda.id);
+            for (const member of members) {
+                uniqueUsers.set(member.id, member);
+            }
+        }
+
+        for (const user of uniqueUsers.values()) {
+            await sendMessagesToUser(user, [{ body: message }]);
+        }
+
+        return { sentCount: uniqueUsers.size, targetLabel: "todos los grupos" };
+    }
+
+    const tanda = await getTandaByName(targetGroupName);
+    if (!tanda) {
+        throw new Error(`Tanda "${targetGroupName}" not found`);
+    }
+
+    const users = await getUsersByTandaId(tanda.id);
+    for (const user of users) {
+        await sendMessagesToUser(user, [{ body: message }]);
+    }
+
+    return { sentCount: users.length, targetLabel: tanda.name };
+};
+
+/**
+ * Sends a collection of messages to an explicit list of users.
+ *
+ * @deprecated Use `sendMessagesToUser`, `sendMessagesToAdmins`, or
+ * `sendMessageToTandaGroup` so recipients are resolved from current Notion data.
+ */
+export const sendMessagesToProvidedUsers = async (
     users: User[],
     messages: string[],
-): void => {
+): Promise<void> => {
     try {
-        users.forEach((user) => {
-            if (user.phone.length < 11) {
-                return;
+        for (const user of users) {
+            if (!user.phone || user.phone.length < 11) {
+                continue;
             }
-
-            const userPhone = "+" + user.phone;
-            messages.forEach((message) => {
-                provider.sendMessage(userPhone, message, {});
-            });
-        });
+            await sendMessagesToUser(
+                user,
+                messages.map((body) => ({ body })),
+            );
+        }
     } catch (error) {
-        logger.error(`Error al enviar mensaje a usuario: ${String(error)}`);
+        logger.error(
+            { err: error, event: "message.bulk-send.failed" },
+            "Could not send bulk messages to users",
+        );
     }
 };
 
@@ -93,63 +163,66 @@ export const sendReminderToDebtors = async (
     tanda: Tanda,
     reminderDay: number,
 ) => {
-    logger.info(`Sending messages to ${tanda.name} debtors`);
+    logger.info(
+        {
+            event: "reminders.delivery.started",
+            tandaId: tanda.id,
+            tandaName: tanda.name,
+            debtors: debtors.length,
+            reminderDay,
+        },
+        "Sending tanda reminders to debtors",
+    );
 
-    debtors.forEach((debtor) => {
+    const unitCostFormatted = pesosFormatter.format(tanda.costPerUser);
+    const periodWord =
+        tanda.suscriptionType === SUSCRIPTION_TYPES.ANNUAL ? "año" : "mes";
+    const periodPlural =
+        tanda.suscriptionType === SUSCRIPTION_TYPES.ANNUAL ? "años" : "meses";
+
+    for (const debtor of debtors) {
         const messages: Message[] = [];
+        const totalFormatted = pesosFormatter.format(debtor.totalAmountOwed);
+        const amountSummary =
+            debtor.missingPayments > 1
+                ? `*${totalFormatted} pesos* (${debtor.missingPayments} ${periodPlural} de ${unitCostFormatted}${
+                      debtor.creditBalance > 0
+                          ? `, descontando ${pesosFormatter.format(debtor.creditBalance)} de saldo a favor`
+                          : ""
+                  })`
+                : `*${totalFormatted} pesos*`;
 
-        if (tanda.suscriptionType === "monthly") {
+        if (tanda.suscriptionType === SUSCRIPTION_TYPES.MONTHLY) {
             switch (reminderDay) {
                 case 5:
                     messages.push(
                         {
-                            body: `Hola ${
-                                debtor.user.name
-                            } 👋🏼! Aca Chrisbot recordandote que esta semana debes pagar tu parte de ${toTitleCase(
-                                tanda.name,
-                            )} (*${tanda.costPerUser} pesos* 😉)`,
+                            body: `Hola ${debtor.user.name} 👋🏼! Acá Tandasbot recordándote que esta semana debes pagar tu parte de *${toTitleCase(tanda.name)}* (${amountSummary} 😉).`,
                         },
                         {
-                            body: `👀 Psst: Recuerda enviarme por aquí tu comprobante enviando *pagar ${tanda.name}* para registrar tu pago correctamente 🤩`,
+                            body: `👀 Psst: Envía *pagar ${tanda.name.toLowerCase()}* para registrar tu comprobante correctamente 🤩.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
-
                     break;
 
                 case 3:
                     messages.push(
                         {
-                            body: `Hola de nuevo 😅, te recuerdo que en 3 días debes pagar tu parte de ${toTitleCase(
-                                tanda.name,
-                            )} (psst: son *${tanda.costPerUser} pesos* 😉)`,
+                            body: `Hola de nuevo 😅, te recuerdo que en 3 días es la fecha límite de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary}.`,
                         },
                         {
-                            body: "Recuerda que puedes enviar `datos de pago` para que te envíe mis datos de pago de pago 🤓",
+                            body: `Recuerda que puedes enviar \`datos de pago\` para ver los datos bancarios de pago 🤓.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
-                    if (debtor.missingPayments > 1) {
-                        messages.push({
-                            body: `También te recuerdo que tienes ${
-                                debtor.missingPayments
-                            } pagos pendientes de ${toTitleCase(
-                                tanda.name,
-                            )} 😵‍💫`,
-                        });
-                    }
-
                     break;
 
                 case 1:
                     messages.push(
                         {
-                            body: `Jeloou 👀... Mañana es la fecha de pago de de ${toTitleCase(
-                                tanda.name,
-                            )} por favor paga tu parte de *${
-                                tanda.costPerUser
-                            } pesos* 🥹`,
+                            body: `Jeloou 👀... Mañana es la fecha límite de pago de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary} 🥹.`,
                         },
                         {
-                            body: `Si tienes alguna situación que te impida realizar el pago a tiempo, por favor házmelo saber a mi numero personal 🙏🏼`,
+                            body: `Si tienes alguna situación que te impida realizar el pago a tiempo, avisa al administrador de tu tanda 🙏🏼.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -157,59 +230,37 @@ export const sendReminderToDebtors = async (
                 case 0:
                     messages.push(
                         {
-                            body: `🚨 Hoy es la fecha de pago de ${toTitleCase(
-                                tanda.name,
-                            )}!!! Recuerda pagar tu parte de *${
-                                tanda.costPerUser
-                            } pesos* 💨`,
+                            body: `🚨 ¡Hoy es la fecha límite de pago de *${toTitleCase(tanda.name)}*! Total a pagar: ${amountSummary} 💨.`,
                         },
                         {
-                            body: `Evita la eliminación de tu cuenta pagando a tiempo 😬`,
+                            body: `Envía \`pagar ${tanda.name.toLowerCase()}\` para registrar tu pago.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
-
                     break;
 
                 case -2:
                     messages.push(
                         {
-                            body: `Hola! Hace 2 días fue la fecha de pago de *${toTitleCase(
-                                tanda.name,
-                            )}* y no tengo registro de tu pago 😕. Si aún no lo has realizado o registrado con *pagar ${
-                                tanda.name
-                            }* hazlo ahora y evita la eliminación de tu cuenta!`,
+                            body: `Hola ${debtor.user.name}, hace 2 días venció la fecha de pago de *${toTitleCase(tanda.name)}* y aún tienes *${debtor.missingPayments} ${debtor.missingPayments === 1 ? periodWord : periodPlural}* pendiente(s) por un total de ${amountSummary} 😕.`,
                         },
                         {
-                            body: `Si ya registraste tu pago, *por favor enviame un mensaje a mi numero personal para verificarlo* 🧐`,
+                            body: `Registra tu comprobante con *pagar ${tanda.name.toLowerCase()}* o contacta al administrador de tu tanda si ya pagaste.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
-                    if (debtor.missingPayments > 1) {
-                        messages.push({
-                            body: `También te recuerdo que tienes ${
-                                debtor.missingPayments
-                            } pagos pendientes de ${toTitleCase(
-                                tanda.name,
-                            )} 😵‍💫`,
-                        });
-                    }
-
                     break;
+
                 default:
                     break;
             }
-        } else if (tanda.suscriptionType === "annual") {
+        } else if (tanda.suscriptionType === SUSCRIPTION_TYPES.ANNUAL) {
             switch (reminderDay) {
                 case 30:
                     messages.push(
                         {
-                            body: `Hola ${
-                                debtor.user.name
-                            } 👋🏼! Un tiempo sin hablar contigo, soy Chrisbot recordandote que este mes debes pagar tu parte *anual* de ${toTitleCase(
-                                tanda.name,
-                            )} (*${tanda.costPerUser} pesos* 😉)`,
+                            body: `Hola ${debtor.user.name} 👋🏼! Acá Tandasbot recordándote que este mes toca tu pago *anual* de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary} 😉.`,
                         },
                         {
-                            body: `👀 Psst: Recuerda enviarme por aquí tu comprobante enviando *pagar ${tanda.name}* para registrar tu pago correctamente 🤩`,
+                            body: `👀 Envía *pagar ${tanda.name.toLowerCase()}* para registrar tu comprobante 🤩.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -217,14 +268,10 @@ export const sendReminderToDebtors = async (
                 case 15:
                     messages.push(
                         {
-                            body: `Hola de nuevo ${
-                                debtor.user.name
-                            } 😅, te recuerdo que en 15 días debes pagar tu parte de ${toTitleCase(
-                                tanda.name,
-                            )} (psst: son *${tanda.costPerUser} pesos* 😉)`,
+                            body: `Hola de nuevo ${debtor.user.name} 😅, te recuerdo que en 15 días vence tu parte anual de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary}.`,
                         },
                         {
-                            body: "Recuerda que puedes enviar `datos de pago` para que te envíe mis datos de pago de pago 🤓",
+                            body: `Puedes enviar \`datos de pago\` para ver los datos bancarios de pago 🤓.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -232,14 +279,10 @@ export const sendReminderToDebtors = async (
                 case 7:
                     messages.push(
                         {
-                            body: `Jeje otra vez yo 😅, te recuerdo que en una semana debes pagar tu parte de ${toTitleCase(
-                                tanda.name,
-                            )} tu parte a pagar es de *${
-                                tanda.costPerUser
-                            } pesos* 💵`,
+                            body: `Jeje otra vez yo 😅, en una semana vence tu parte anual de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary} 💵.`,
                         },
                         {
-                            body: "Si cambiaste de opinión y no quieres seguir en el servicio, por favor házmelo saber a mi numero personal 🤓",
+                            body: `Si ya no deseas continuar en el servicio, avisa al administrador de tu tanda 🤓.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
@@ -247,62 +290,65 @@ export const sendReminderToDebtors = async (
                 case 1:
                     messages.push(
                         {
-                            body: `Jeloou 👀... Mañana es la fecha de pago de de ${toTitleCase(
-                                tanda.name,
-                            )} por favor paga tu parte de *${
-                                tanda.costPerUser
-                            } pesos* 🥹`,
+                            body: `Jeloou 👀... Mañana vence el pago anual de *${toTitleCase(tanda.name)}*. Total a pagar: ${amountSummary} 🥹.`,
                         },
                         {
-                            body: `Si tienes alguna situación que te impida realizar el pago a tiempo, por favor házmelo saber a mi numero personal 🙏🏼`,
+                            body: `Si tienes algún inconveniente, avisa al administrador de tu tanda 🙏🏼.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
+
                 case 0:
                     messages.push(
                         {
-                            body: `🚨 Hoy es la fecha de pago de ${toTitleCase(
-                                tanda.name,
-                            )}!!! Recuerda pagar tu parte de *${
-                                tanda.costPerUser
-                            } pesos* 💨`,
+                            body: `🚨 ¡Hoy es la fecha límite de pago anual de *${toTitleCase(tanda.name)}*! Total a pagar: ${amountSummary} 💨.`,
                         },
                         {
-                            body: `Evita la eliminación de tu cuenta pagando a tiempo 😬`,
+                            body: `Envía \`pagar ${tanda.name.toLowerCase()}\` para registrar tu comprobante.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
+
                 case -2:
                     messages.push(
                         {
-                            body: `Hola! Hace 2 días fue la fecha de pago de *${toTitleCase(
-                                tanda.name,
-                            )}* y no tengo registro de tu pago 😕. Si aún no lo has realizado o registrado con *pagar ${
-                                tanda.name
-                            }* hazlo ahora y evita la eliminación de tu cuenta!`,
+                            body: `Hola ${debtor.user.name}, hace 2 días venció la fecha de pago de *${toTitleCase(tanda.name)}* y tienes pendiente un total de ${amountSummary} 😕.`,
                         },
                         {
-                            body: `Si ya registraste tu pago, *por favor enviame un mensaje a mi numero personal para verificarlo* 🧐`,
+                            body: `Registra tu comprobante con *pagar ${tanda.name.toLowerCase()}* o contacta al administrador de tu tanda si ya pagaste.\n\n${SUSPENSION_WARNING}`,
                         },
                     );
                     break;
+
                 default:
                     break;
             }
         }
 
         if (messages.length > 0) {
-            sendMessagesToUser(debtor.user, messages);
-            logger.info(`Messages sent to ${debtor.user.name}`);
+            await sendMessagesToUser(debtor.user, messages);
+            logger.debug(
+                {
+                    event: "reminders.delivery.user.completed",
+                    userId: debtor.user.id,
+                    tandaId: tanda.id,
+                    messages: messages.length,
+                },
+                "Reminder sent to debtor",
+            );
         }
-    });
+    }
 
-    logger.info(`Messages sent to ${tanda.name} debtors`);
+    logger.info(
+        { event: "reminders.delivery.completed", tandaId: tanda.id, debtors: debtors.length },
+        "Tanda reminders delivered",
+    );
 };
 
-export const hasUserAcceptedTandaTerms = (
-    tanda: string,
-    user: User,
-): boolean => {
-    return user[`hasAccepted${textToPascalCase(tanda)}Terms`] || false;
+export const hasUserAcceptedTandaTerms = async (
+    userId: string,
+    tandaId: string,
+): Promise<boolean> => {
+    const legal = await getUserTandaLegal(userId, tandaId);
+    return legal?.acceptedRules || false;
 };

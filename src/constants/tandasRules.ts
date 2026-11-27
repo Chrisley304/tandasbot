@@ -1,97 +1,49 @@
-import { Tanda } from "@custom-types/notion/tandasDB";
+import type { Tanda } from "@custom-types/notion/tandasDB";
+import { SUSCRIPTION_TYPES } from "@enums/suscriptions";
+import { getMexicoCityDateParts } from "@utils/datetimes";
 import { pesosFormatter } from "@utils/misc";
 
-export const generateSpotifyRulesMessage = (tanda: Tanda) => {
+const SPANISH_MONTHS = [
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+];
+
+/**
+ * Generates the rules messages for any dynamic tanda:
+ * 1) Rules text from Notion ("Reglas tanda") with a fallback template
+ * 2) Separate message with the cost per member and payment due day/date
+ */
+export const generateTandaRulesMessages = (tanda: Tanda): string[] => {
     const formattedCost = pesosFormatter.format(tanda.costPerUser);
-    const paymentDay = tanda.paymentDay.getDate() + 1;
+    const { day, month } = getMexicoCityDateParts(tanda.paymentDay);
 
-    return [
-        '📃 Reglamento de participación en la "Tanda" de *Spotify* 🎧\n',
+    const rulesText = tanda.rules?.trim()
+        ? tanda.rules.trim()
+        : [
+              `📃 Reglamento de participación en la "Tanda" de *${tanda.name}*`,
+              "⏳ *Tiempo de tolerancia:* Respeta la fecha límite de pago o avisa con anticipación si tienes algún inconveniente.",
+              "🚨 *Expulsión por impago:* Dejar de pagar sin aviso resultará en la suspensión definitiva del servicio.",
+              "🔄 *Salida del grupo:* Avisa con al menos 1 mes de anticipación.",
+          ].join("\n\n");
 
-        `✅ *Pago Mensual:* Debes pagar ${formattedCost} pesos a más tardar el día ${paymentDay} de cada mes.`,
+    const scheduleText =
+        tanda.suscriptionType === SUSCRIPTION_TYPES.ANNUAL
+            ? `antes del día *${day} de ${SPANISH_MONTHS[month - 1]}* de cada año`
+            : `antes del día *${day}* de cada mes`;
 
-        "⏳ *Tiempo de tolerancia:* Tienes hasta 15 días después de la fecha límite para hacerlo.",
+    const paymentSummaryMessage = `💵 *Monto a pagar:* *${formattedCost} pesos* (${
+        tanda.suscriptionType === SUSCRIPTION_TYPES.ANNUAL ? "anual" : "mensual"
+    })\n📅 *Fecha límite:* Debes realizar tu pago ${scheduleText}.`;
 
-        "⚠️ *Justificación de Retraso:* Si tienes algún problema para pagar dentro de la tolerancia, avísame con anticipación (a mi numero personal) y explícame la situación para buscar una solución (_Nota: Puede aplicar una tarifa por retraso 😬_).",
-
-        "🚨 *Expulsión por Impago:* Si no pagas dentro del plazo y no das ninguna explicación, serás expulsado automáticamente del grupo.",
-
-        "🔄 *Salida del Grupo:* Si deseas salir del grupo, debes avisarme con un mes de anticipación y pagar tu último mes. Esto es para que pueda encontrar un reemplazo a tiempo 🙏🏼. (_Ejemplo: si quieres salir en septiembre, debes avisar en agosto y pagar ese mes_).",
-
-        "🔒 *Privacidad de Datos:* Ten la confianza que tu información personal (nombre, contacto e historial de pagos) será utilizada únicamente para el funcionamiento del bot (es decir solo yo tengo esos datos) y no será compartida con NADIE.",
-
-        "🤝 *Compromiso:* Al aceptar las reglas de la tanda te comprometes a cumplir con los pagos en tiempo y forma y estás de acuerdo en que almacene tu nombre, contacto e historial de pagos en el bot para la administración de la tanda.",
-    ];
-};
-
-export const generateHBOMaxRulesMessage = (tanda: Tanda) => {
-    const formattedCost = pesosFormatter.format(tanda.costPerUser);
-    const paymentDay = tanda.paymentDay.getDate() + 1;
-
-    return [
-        '📃 Reglamento de participación en la "Tanda" de *HBO Max* 🍿\n',
-
-        `✅ *Pago Mensual:* Debes pagar ${formattedCost} pesos a más tardar el día ${paymentDay} de cada mes.`,
-
-        "⏳ *Tiempo de tolerancia:* Tienes hasta 15 días después de la fecha límite para hacerlo.",
-
-        "⚠️ *Justificación de Retraso:* Si tienes algún problema para pagar dentro de la tolerancia, avísame con anticipación (a mi numero personal) y explícame la situación para buscar una solución (_Nota: Puede aplicar una tarifa por retraso 😬_).",
-
-        "🚨 *Expulsión por Impago:* Si no pagas dentro del plazo y no das ninguna explicación, serás expulsado automáticamente del grupo.",
-
-        "🔄 *Salida del Grupo:* Si deseas salir del grupo, debes avisarme con un mes de anticipación y pagar tu último mes. Esto es para que pueda encontrar un reemplazo a tiempo 🙏🏼. (_Ejemplo: si quieres salir en septiembre, debes avisar en agosto y pagar ese mes_).",
-
-        "🔒 *Privacidad de Datos:* Ten la confianza que tu información personal (nombre, contacto e historial de pagos) será utilizada únicamente para el funcionamiento del bot (es decir solo yo tengo esos datos) y no será compartida con NADIE.",
-
-        "🤝 *Compromiso:* Al aceptar las reglas de la tanda te comprometes a cumplir con los pagos en tiempo y forma y estás de acuerdo en que almacene tu nombre, contacto e historial de pagos en el bot para la administración de la tanda.",
-    ];
-};
-
-export const generateAmazonPrimeRulesMessage = (tanda: Tanda) => {
-    const formattedCost = pesosFormatter.format(tanda.costPerUser);
-    const paymentDay = tanda.paymentDay.toLocaleDateString("es-MX", {
-        day: "numeric",
-        month: "long",
-    });
-
-    return [
-        '📃 Reglamento de participación en la "Tanda" de *Amazon Prime* 📦\n',
-
-        `✅ *Pago Anual:* Debes pagar ${formattedCost} pesos a más tardar el día ${paymentDay} de cada año.`,
-
-        "⏳ *Tiempo de tolerancia:* Tienes hasta 20 días después de la fecha límite para hacerlo.",
-
-        "⚠️ *Justificación de Retraso:* Si tienes algún problema para pagar dentro de la tolerancia, avísame con anticipación (a mi numero personal) y explícame la situación para buscar una solución (_Nota: Puede aplicar una tarifa por retraso 😬_).",
-
-        "🚨 *Expulsión por Impago:* Si no pagas dentro del plazo y no das ninguna explicación, serás expulsado automáticamente del grupo.",
-
-        "🔄 *Salida del Grupo:* Si deseas salir del grupo, debes avisarme *máximo* con un mes de anticipación de la siguiente fecha de pago. Esto es para que pueda encontrar un reemplazo a tiempo 🙏🏼. (_Ejemplo: si quieres salir en septiembre, debes avisar en agosto y pagar ese mes_).",
-
-        "🔒 *Privacidad de Datos:* Ten la confianza que tu información personal (nombre, contacto e historial de pagos) será utilizada únicamente para el funcionamiento del bot (es decir solo yo tengo esos datos) y no será compartida con NADIE.",
-
-        "🤝 *Compromiso:* Al aceptar las reglas de la tanda te comprometes a cumplir con los pagos en tiempo y forma y estás de acuerdo en que almacene tu nombre, contacto e historial de pagos en el bot para la administración de la tanda.",
-    ];
-};
-
-export const generateYoutubePremiumRulesMessage = (tanda: Tanda) => {
-    const formattedCost = pesosFormatter.format(tanda.costPerUser);
-    const paymentDay = tanda.paymentDay.getDate() + 1;
-
-    return [
-        '📃 Reglamento de participación en la "Tanda" de *Youtube Premium* 🎥\n',
-
-        `✅ *Pago Mensual:* Debes pagar ${formattedCost} pesos a más tardar el día ${paymentDay} de cada mes.`,
-
-        "⏳ *Tiempo de tolerancia:* Tienes hasta 15 días después de la fecha límite para hacerlo.",
-
-        "⚠️ *Justificación de Retraso:* Si tienes algún problema para pagar dentro de la tolerancia, avísame con anticipación (a mi numero personal) y explícame la situación para buscar una solución (_Nota: Puede aplicar una tarifa por retraso 😬_).",
-
-        "🚨 *Expulsión por Impago:* Si no pagas dentro del plazo y no das ninguna explicación, serás expulsado automáticamente del grupo.",
-
-        "🔄 *Salida del Grupo:* Si deseas salir del grupo, debes avisarme con un mes de anticipación y pagar tu último mes. Esto es para que pueda encontrar un reemplazo a tiempo 🙏🏼. (_Ejemplo: si quieres salir en septiembre, debes avisar en agosto y pagar ese mes_).",
-
-        "🔒 *Privacidad de Datos:* Ten la confianza que tu información personal (nombre, contacto e historial de pagos) será utilizada únicamente para el funcionamiento del bot (es decir solo yo tengo esos datos) y no será compartida con NADIE.",
-
-        "🤝 *Compromiso:* Al aceptar las reglas de la tanda te comprometes a cumplir con los pagos en tiempo y forma y estás de acuerdo en que almacene tu nombre, contacto e historial de pagos en el bot para la administración de la tanda.",
-    ];
+    return [rulesText, paymentSummaryMessage];
 };

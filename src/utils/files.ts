@@ -28,6 +28,11 @@ export const savePaymentPhoto = async (
         path: `${process.cwd()}/${VOUCHERS_PATH}/${userId}`,
     });
 
+    logger.info(
+        { event: "voucher.saved", userId, fileName: basename(localPath) },
+        "Payment voucher saved locally",
+    );
+
     return localPath;
 };
 
@@ -56,14 +61,23 @@ export const uploadFileToNotion = async (filePath: string): Promise<string> => {
         });
 
         if (uploadResponse.status === "uploaded") {
-            logger.info("File uploaded to Notion successfully");
+            logger.info(
+                { event: "voucher.upload.completed", fileName: basename(filePath) },
+                "Payment voucher uploaded to Notion",
+            );
             return fileUpload.id;
         } else {
-            logger.error("Error uploading file to Notion");
+            logger.error(
+                { event: "voucher.upload.failed", fileName: basename(filePath) },
+                "Notion did not confirm the payment voucher upload",
+            );
             throw new Error("Error uploading file to Notion");
         }
     } catch (error) {
-        logger.error(`Error while uploading file to Notion: ${error}`);
+        logger.error(
+            { err: error, event: "voucher.upload.failed", fileName: basename(filePath) },
+            "Could not upload payment voucher to Notion",
+        );
         throw error;
     }
 };

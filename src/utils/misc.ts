@@ -1,17 +1,10 @@
 /**
- * Capitalize the first letter of a sentence.
- */
-export function capitalizeFirstLetter(sentence: string) {
-    return sentence.charAt(0).toUpperCase() + sentence.slice(1);
-}
-
-/**
  * Capitalize the first letter of each word in a sentence.
  */
 export const toTitleCase = (str: string) =>
     str.replace(
         /(^\w|\s\w)(\S*)/g,
-        (_, m1, m2) => m1.toUpperCase() + m2.toLowerCase()
+        (_, m1, m2) => m1.toUpperCase() + m2.toLowerCase(),
     );
 
 export const pesosFormatter = new Intl.NumberFormat("es-MX", {
@@ -20,34 +13,21 @@ export const pesosFormatter = new Intl.NumberFormat("es-MX", {
 });
 
 /**
- * Convert a string to camelCase
- * @param text - The text to convert
+ * Round a currency amount to 2 decimal places.
  */
-export const textToCamelCase = (text: string) =>
-    text
-        .replace(/(?:^\w|[A-Z]|\b\w)/g, function (word, index) {
-            return index == 0 ? word.toLowerCase() : word.toUpperCase();
-        })
-        .replace(/\s+/g, "");
+export const roundCurrency = (amount: number): number =>
+    Math.round((amount + Number.EPSILON) * 100) / 100;
 
 /**
- * Convert a string to PascalCase
- * @param text - The text to convert
+ * Normalize a tanda name or command fragment for comparison:
+ * strips emojis/symbols, accents, trims, lowercases, and collapses whitespace.
  */
-export const textToPascalCase = (text: string) =>
+export const normalizeTandaName = (text: string): string =>
     text
-        .replace(/(?:^\w|[A-Z]|\b\w)/g, function (word, index) {
-            return word.toUpperCase();
-        })
-        .replace(/\s+/g, "");
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
 
-/**
- * Convert a string to snake_case
- * @param text - The text to convert
- */
-export const textToSnakeCase = (text: string) =>
-    text
-        .replace(/(?:^\w|[A-Z]|\b\w)/g, function (word, index) {
-            return index == 0 ? word.toLowerCase() : "_" + word.toLowerCase();
-        })
-        .replace(/\s+/g, "");

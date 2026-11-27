@@ -9,24 +9,15 @@ export enum BOT_COMMANDS {
     SEND_CUSTOM_MESSAGE = "mensaje personalizado",
     TANDA_STATUS = "estatus tandas",
     RESEND_TANDA_REMINDERS = "reenviar recordatorios tandas",
-
-    // Spotify
-    PAY_SPOTIFY = "pagar spotify",
-    MY_SPOTIFY = "mi spotify",
-    SPOTIFY_RULES = "reglamento spotify",
-
-    // HBO Max
-    PAY_HBO_MAX = "pagar hbo max",
-    MY_HBO_MAX = "mi hbo max",
-    HBO_MAX_RULES = "reglamento hbo max",
-
-    // YouTube Premium
-    PAY_YOUTUBE = "pagar youtube",
-    MY_YOUTUBE = "mi youtube",
-    YOUTUBE_PREMIUM_RULES = "reglamento youtube premium",
-
-    // Amazon Prime
-    PAY_AMAZON = "pagar amazon",
-    MY_AMAZON = "mi amazon",
-    AMAZON_PRIME_RULES = "reglamento amazon prime",
+    USER_STATUS = "estatus usuario",
+    GRANT_TANDA_PERIODS = "regalar periodos",
+    CHANGE_TANDA_PRICE = "cambiar precio tanda",
+    CHANGE_TANDA_PASSWORD = "cambiar contraseña tanda",
+    CHANGE_TANDA_PASSWORD_WITHOUT_TILDE = "cambiar contrasena tanda",
 }
+
+export const TANDA_COMMAND_PREFIXES = {
+    PAY: "pagar ",
+    MY: "mi ",
+    RULES: "reglamento ",
+} as const;

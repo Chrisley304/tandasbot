@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-11-26
+
+### Added
+
+- Added the admin-only `regalar periodos` flow to grant paid tanda periods without a voucher, recording the credited amount and the responsible administrator in Notion.
+- Added clear structured application logs, configurable log level and color output, and renewed WhatsApp typing presence for longer status responses.
+- Added a configurable filter for the noisy `libsignal` `Closing session:` messages (`SUPPRESS_LIBSIGNAL_SESSION_LOGS`).
+
+### Changed
+
+- Rebranded the bot as Tandasbot and focused its copy, menus, documentation, and AI context exclusively on tanda management. The AI context now identifies Tandasbot as an open-source project created by Christian Leyva and links to its source repository.
+- Upgraded BuilderBot packages to v1.5.2 and adapted flows to its asynchronous state API and dynamic-regex format.
+- Renamed the administrator command `adeudos usuario` to `estatus usuario`.
+- Removed obsolete user constants, roles, npm lockfile, and unused development configuration while preserving deprecated compatibility helpers.
+
+### Fixed
+
+- Fixed dynamic payment-command matching that could make BuilderBot evaluate a regular expression as invalid JavaScript.
+
 ## [4.1.0] - 2026-07-14
 
 ### Fixed
