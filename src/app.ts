@@ -1,3 +1,4 @@
+import "./utils/consoleFilter";
 import { createBot } from "@builderbot/bot";
 import { schedule } from "node-cron";
 import dotenv from "dotenv";

@@ -68,6 +68,8 @@ Los administradores se definen en Notion con la casilla `Admin?`; no se configur
 
 Para diagnóstico local usa `LOG_LEVEL=debug`. En servidores o agregadores de logs puedes usar `LOG_COLOR=false` para desactivar los colores ANSI.
 
+Tandasbot también oculta por defecto el mensaje ruidoso `Closing session: SessionEntry...` emitido directamente por libsignal. Usa `SUPPRESS_LIBSIGNAL_SESSION_LOGS=false` solo si necesitas diagnosticar internamente la sesión de WhatsApp.
+
 ## Esquema de Notion
 
 | Tabla | Variable de entorno | Propiedades principales |
