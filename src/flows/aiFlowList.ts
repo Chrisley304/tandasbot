@@ -6,6 +6,7 @@ import {
     changeTandaPasswordFlow,
     changeTandaPriceFlow,
     getTandasStatusFlow,
+    grantTandaPeriodsFlow,
     sendDailyRemindersFlow,
     sendMessageToGroupFlow,
     sendMessageToUserFlow,
@@ -46,6 +47,8 @@ export const getFlowByCommandName = (
             return { flow: sendDailyRemindersFlow };
         case BOT_COMMANDS.USER_STATUS:
             return { flow: userDebtLookupFlow };
+        case BOT_COMMANDS.GRANT_TANDA_PERIODS:
+            return { flow: grantTandaPeriodsFlow };
         case BOT_COMMANDS.CHANGE_TANDA_PRICE:
             return { flow: changeTandaPriceFlow };
         case BOT_COMMANDS.CHANGE_TANDA_PASSWORD:

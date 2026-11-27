@@ -39,7 +39,10 @@ export const sendMessagesToUser = async (
 ): Promise<void> => {
     try {
         if (!user.phone || user.phone.length < 10) {
-            logger.warn(`Skipping message to ${user.name}: invalid phone`);
+            logger.warn(
+                { event: "message.send.skipped", userId: user.id, reason: "invalid_phone" },
+                "Message was not sent because the recipient has an invalid phone",
+            );
             return;
         }
 
@@ -55,9 +58,14 @@ export const sendMessagesToUser = async (
                 );
             }
         }
+        logger.debug(
+            { event: "message.send.completed", userId: user.id, messages: messages.length },
+            "Message delivery completed",
+        );
     } catch (error) {
         logger.error(
-            `Error al enviar mensaje a ${user.name}: ${String(error)}`,
+            { err: error, event: "message.send.failed", userId: user.id },
+            "Could not send message to user",
         );
     }
 };
@@ -78,7 +86,10 @@ export const sendMessagesToAdmins = async (
             await sendMessagesToUser(admin, messages);
         }
     } catch (error) {
-        logger.error(`Error al enviar mensaje a admins: ${String(error)}`);
+        logger.error(
+            { err: error, event: "message.admin-notification.failed" },
+            "Could not send notification to administrators",
+        );
     }
 };
 
@@ -140,7 +151,10 @@ export const sendMessagesToProvidedUsers = async (
             );
         }
     } catch (error) {
-        logger.error(`Error al enviar mensaje a usuario: ${String(error)}`);
+        logger.error(
+            { err: error, event: "message.bulk-send.failed" },
+            "Could not send bulk messages to users",
+        );
     }
 };
 
@@ -149,7 +163,16 @@ export const sendReminderToDebtors = async (
     tanda: Tanda,
     reminderDay: number,
 ) => {
-    logger.info(`Sending messages to ${tanda.name} debtors (day: ${reminderDay})`);
+    logger.info(
+        {
+            event: "reminders.delivery.started",
+            tandaId: tanda.id,
+            tandaName: tanda.name,
+            debtors: debtors.length,
+            reminderDay,
+        },
+        "Sending tanda reminders to debtors",
+    );
 
     const unitCostFormatted = pesosFormatter.format(tanda.costPerUser);
     const periodWord =
@@ -304,11 +327,22 @@ export const sendReminderToDebtors = async (
 
         if (messages.length > 0) {
             await sendMessagesToUser(debtor.user, messages);
-            logger.info(`Messages sent to ${debtor.user.name}`);
+            logger.debug(
+                {
+                    event: "reminders.delivery.user.completed",
+                    userId: debtor.user.id,
+                    tandaId: tanda.id,
+                    messages: messages.length,
+                },
+                "Reminder sent to debtor",
+            );
         }
     }
 
-    logger.info(`Messages sent to ${tanda.name} debtors`);
+    logger.info(
+        { event: "reminders.delivery.completed", tandaId: tanda.id, debtors: debtors.length },
+        "Tanda reminders delivered",
+    );
 };
 
 export const hasUserAcceptedTandaTerms = async (

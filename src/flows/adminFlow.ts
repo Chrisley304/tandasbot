@@ -14,6 +14,7 @@ import { getActiveTandas, getTandaByName, getTandaValidPayments } from "@utils/n
 import { getUserFromName } from "@utils/notion/usersDB";
 import {
     adjustTandaPriceAndAdvancePayments,
+    grantTandaPeriods,
     getDebtorsFromTanda,
     getTotalMoneyFromTandaPayments,
     getUserDetailedDebtSummary,
@@ -237,6 +238,15 @@ export const getTandasStatusFlow = addKeyword<Provider, Database>(
             const currentDatetime = new Date();
             const messages: string[] = [];
 
+            logger.info(
+                {
+                    event: "admin.tanda-status.started",
+                    adminId: user.id,
+                    activeTandas: tandas.length,
+                },
+                "Building tanda status report",
+            );
+
             for (const tanda of tandas) {
                 const debtors = await getDebtorsFromTanda(tanda, currentDatetime);
                 const validPayments = await getTandaValidPayments(tanda.id);
@@ -265,6 +275,17 @@ export const getTandasStatusFlow = addKeyword<Provider, Database>(
                 ];
 
                 messages.push(lines.join("\n"));
+
+                logger.debug(
+                    {
+                        event: "admin.tanda-status.tanda.completed",
+                        tandaId: tanda.id,
+                        tandaName: tanda.name,
+                        debtors: debtors.length,
+                        validPayments: validPayments.length,
+                    },
+                    "Tanda status calculated",
+                );
             }
 
             if (messages.length === 0) {
@@ -272,9 +293,21 @@ export const getTandasStatusFlow = addKeyword<Provider, Database>(
             } else {
                 await flowDynamic(messages);
             }
+
+            logger.info(
+                {
+                    event: "admin.tanda-status.completed",
+                    adminId: user.id,
+                    reportsSent: messages.length,
+                },
+                "Tanda status report sent",
+            );
         });
     } catch (error) {
-        logger.error(error);
+        logger.error(
+            { err: error, event: "admin.tanda-status.failed" },
+            "Could not build tanda status report",
+        );
         await flowDynamic(GENERIC_ERROR_MESSAGE);
     }
 });
@@ -359,6 +392,187 @@ export const userDebtLookupFlow = addKeyword<Provider, Database>(
         });
     } catch (error) {
         logger.error(error);
+        await flowDynamic(GENERIC_ERROR_MESSAGE);
+    }
+});
+
+export const grantTandaPeriodsHandler = addKeyword(EVENTS.ACTION)
+    .addAction(async (ctx, { gotoFlow }) => {
+        startIdle(ctx, gotoFlow);
+    })
+    .addAnswer(
+        withCancelInstruction(
+            "🎁 Escribe el *nombre* del usuario al que deseas otorgar periodos:",
+        ),
+        { capture: true },
+        async (ctx, { flowDynamic, fallBack, endFlow, state, gotoFlow, provider }) => {
+            if (isCancelCommand(ctx.body)) {
+                stopIdle(ctx);
+                await state.clear();
+                return endFlow(OPERATION_CANCELLED_MESSAGE);
+            }
+
+            try {
+                const targetUser = await withTyping(ctx, provider, () =>
+                    getUserFromName(ctx.body),
+                );
+                if (!targetUser) {
+                    resetIdle(ctx, gotoFlow);
+                    return fallBack(
+                        withCancelInstruction(
+                            "😰 No encontré ese usuario en Notion. Intenta con otro nombre:",
+                        ),
+                    );
+                }
+
+                const userTandas = (await getActiveTandas()).filter((tanda) =>
+                    targetUser.tandaIds.includes(tanda.id),
+                );
+                if (userTandas.length === 0) {
+                    stopIdle(ctx);
+                    await state.clear();
+                    return endFlow(
+                        `ℹ️ *${targetUser.name}* no tiene tandas activas a las que se puedan otorgar periodos.`,
+                    );
+                }
+
+                await state.update({ giftTargetUser: targetUser });
+                resetIdle(ctx, gotoFlow);
+                await flowDynamic(
+                    `Elige la tanda para *${targetUser.name}*:\n${userTandas
+                        .map((tanda) => `- ${tanda.name}`)
+                        .join("\n")}`,
+                );
+            } catch (error) {
+                stopIdle(ctx);
+                logger.error(
+                    { err: error, event: "admin.period-gift.user-lookup.failed" },
+                    "Could not find user for granted periods",
+                );
+                await state.clear();
+                await flowDynamic(GENERIC_ERROR_MESSAGE);
+            }
+        },
+    )
+    .addAnswer(
+        withCancelInstruction(
+            "🎯 Escribe el *nombre de la tanda* a la que deseas otorgar periodos:",
+        ),
+        { capture: true },
+        async (ctx, { fallBack, endFlow, state, gotoFlow, provider }) => {
+            if (isCancelCommand(ctx.body)) {
+                stopIdle(ctx);
+                await state.clear();
+                return endFlow(OPERATION_CANCELLED_MESSAGE);
+            }
+
+            const targetUser = await state.get<User>("giftTargetUser");
+            const tanda = await withTyping(ctx, provider, () =>
+                getTandaByName(ctx.body),
+            );
+            if (!targetUser || !tanda || !tanda.isActive || !targetUser.tandaIds.includes(tanda.id)) {
+                resetIdle(ctx, gotoFlow);
+                return fallBack(
+                    withCancelInstruction(
+                        "😰 Esa tanda no está activa o no pertenece al usuario. Elige una de las tandas listadas:",
+                    ),
+                );
+            }
+
+            await state.update({ giftTandaId: tanda.id, giftTandaName: tanda.name });
+            resetIdle(ctx, gotoFlow);
+        },
+    )
+    .addAnswer(
+        withCancelInstruction(
+            "🔢 ¿Cuántos *periodos completos* deseas otorgar? Escribe un número entero mayor a 0:",
+        ),
+        { capture: true },
+        async (ctx, { flowDynamic, fallBack, endFlow, state, gotoFlow, provider }) => {
+            if (isCancelCommand(ctx.body)) {
+                stopIdle(ctx);
+                await state.clear();
+                return endFlow(OPERATION_CANCELLED_MESSAGE);
+            }
+
+            const periodsText = (ctx.body || "").trim();
+            const periods = Number(periodsText);
+            if (!/^\d+$/.test(periodsText) || !Number.isInteger(periods) || periods <= 0) {
+                resetIdle(ctx, gotoFlow);
+                return fallBack(
+                    withCancelInstruction(
+                        "❌ Ingresa un número entero mayor a 0 (por ejemplo, `1` o `3`):",
+                    ),
+                );
+            }
+
+            stopIdle(ctx);
+            try {
+                await withTyping(ctx, provider, async () => {
+                    const [admin, targetUser, tandaId] = await Promise.all([
+                        resolveUserFromContext(ctx),
+                        state.get<User>("giftTargetUser"),
+                        state.get<string>("giftTandaId"),
+                    ]);
+                    if (!admin || !isUserAllowed(admin, { requireAdmin: true }) || !targetUser || !tandaId) {
+                        await state.clear();
+                        await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
+                        return;
+                    }
+
+                    const result = await grantTandaPeriods({
+                        admin,
+                        user: targetUser,
+                        tandaId,
+                        periods,
+                    });
+                    await state.clear();
+
+                    const periodLabel =
+                        result.tanda.suscriptionType === SUSCRIPTION_TYPES.ANNUAL
+                            ? periods === 1
+                                ? "año"
+                                : "años"
+                            : periods === 1
+                              ? "mes"
+                              : "meses";
+                    await flowDynamic(
+                        [
+                            `✅ Se otorgaron *${periods} ${periodLabel}* de *${result.tanda.name}* a *${targetUser.name}*.`,
+                            `💵 *Monto del abono:* ${pesosFormatter.format(result.amount)}.`,
+                            `📝 *Descripción:* ${result.title}.`,
+                            `📅 *Siguiente pago:* ${formatMexicoCityDate(result.nextPayment)}.`,
+                        ].join("\n"),
+                    );
+                });
+            } catch (error) {
+                logger.error(
+                    { err: error, event: "admin.period-gift.failed" },
+                    "Could not grant tanda periods",
+                );
+                await state.clear();
+                await flowDynamic(GENERIC_ERROR_MESSAGE);
+            }
+        },
+    );
+
+export const grantTandaPeriodsFlow = addKeyword<Provider, Database>(
+    [BOT_COMMANDS.GRANT_TANDA_PERIODS],
+    { sensitive: true },
+).addAction(async (ctx, { flowDynamic, gotoFlow, provider }) => {
+    try {
+        await withTyping(ctx, provider, async () => {
+            const user = await resolveUserFromContext(ctx);
+            if (isUserAllowed(user, { requireAdmin: true })) {
+                return gotoFlow(grantTandaPeriodsHandler);
+            }
+            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
+        });
+    } catch (error) {
+        logger.error(
+            { err: error, event: "admin.period-gift.entry.failed" },
+            "Could not start granted-period flow",
+        );
         await flowDynamic(GENERIC_ERROR_MESSAGE);
     }
 });

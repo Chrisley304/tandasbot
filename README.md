@@ -58,9 +58,15 @@ NOTION_TANDAS_LEGALES_DATASOURCE_ID=xxx
 GEMINI_API_KEY=AIzaSy...
 GEMINI_MODEL_NAME=gemini-1.5-flash
 PORT=3008
+
+# Optional logging configuration
+LOG_LEVEL=info
+LOG_COLOR=true
 ```
 
 Los administradores se definen en Notion con la casilla `Admin?`; no se configuran mediante variables de entorno. La versión de WhatsApp Web también se resuelve automáticamente.
+
+Para diagnóstico local usa `LOG_LEVEL=debug`. En servidores o agregadores de logs puedes usar `LOG_COLOR=false` para desactivar los colores ANSI.
 
 ## Esquema de Notion
 
@@ -79,7 +85,7 @@ Los administradores se definen en Notion con la casilla `Admin?`; no se configur
 - `mi <tanda>`: muestra adeudo, saldo, historial y próxima fecha de pago.
 - `reglamento <tanda>`: muestra y permite aceptar el reglamento.
 
-Los usuarios con `Admin?` activo también pueden enviar mensajes, consultar estatus, reenviar recordatorios, revisar adeudos, ajustar precios y cambiar contraseñas.
+Los usuarios con `Admin?` activo también pueden enviar mensajes, consultar estatus, reenviar recordatorios, revisar adeudos, ajustar precios y cambiar contraseñas. El comando `regalar periodos` permite otorgar periodos completos de una tanda a un usuario: registra un abono sin comprobante por el monto correspondiente y avanza su siguiente pago.
 
 ## Desarrollo y ejecución
 

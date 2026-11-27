@@ -179,6 +179,15 @@ export const handleDailyTandasReminders = async () => {
     const activeTandas = await getActiveTandas(true);
     const admins = await getAdminUsers();
 
+    logger.info(
+        {
+            event: "reminders.run.started",
+            activeTandas: activeTandas.length,
+            admins: admins.length,
+        },
+        "Evaluating daily tanda reminders",
+    );
+
     if (admins.length > 0) {
         for (const admin of admins) {
             await sendMessagesToUser(admin, [
@@ -202,8 +211,14 @@ export const handleDailyTandasReminders = async () => {
             tandaType,
         );
 
-        logger.info(
-            `Checking tanda ${tanda.name} (daysDiff: ${daysBetweenDates})`,
+        logger.debug(
+            {
+                event: "reminders.tanda.evaluated",
+                tandaId: tanda.id,
+                tandaName: tanda.name,
+                daysUntilCutoff: daysBetweenDates,
+            },
+            "Tanda reminder schedule evaluated",
         );
 
         const shouldSend =
@@ -213,6 +228,10 @@ export const handleDailyTandasReminders = async () => {
                 ANNUAL_REMINDER_DAYS.has(daysBetweenDates));
 
         if (!shouldSend) {
+            logger.debug(
+                { event: "reminders.tanda.skipped", tandaId: tanda.id },
+                "No reminder is scheduled for this tanda today",
+            );
             continue;
         }
 
@@ -224,8 +243,31 @@ export const handleDailyTandasReminders = async () => {
                     body: `Le envié un recordatorio a los que faltan por pagarte su parte de *${tanda.name}* (${debtors.length} deudor(es)).`,
                 },
             ]);
+            logger.info(
+                {
+                    event: "reminders.tanda.sent",
+                    tandaId: tanda.id,
+                    tandaName: tanda.name,
+                    debtors: debtors.length,
+                },
+                "Tanda reminders sent",
+            );
+        } else {
+            logger.info(
+                {
+                    event: "reminders.tanda.no-debtors",
+                    tandaId: tanda.id,
+                    tandaName: tanda.name,
+                },
+                "No reminder sent because the tanda has no debtors",
+            );
         }
     }
+
+    logger.info(
+        { event: "reminders.run.completed", activeTandas: activeTandas.length },
+        "Daily tanda reminder evaluation completed",
+    );
 };
 
 /**
@@ -240,6 +282,15 @@ export const handleTandaPayment = async (
     newCreditBalance: number;
     tandaInfo: Tanda;
 }> => {
+    logger.info(
+        {
+            event: "payment.registration.started",
+            userId: payment.user.id,
+            tandaName: payment.tanda,
+            amount: payment.amount,
+        },
+        "Registering tanda payment",
+    );
     const tandaInfo = await getTandaByName(payment.tanda);
     if (!tandaInfo) {
         throw new Error(`Tanda "${payment.tanda}" not found`);
@@ -310,7 +361,125 @@ export const handleTandaPayment = async (
         creditBalance: newCreditBalance,
     });
 
+    logger.info(
+        {
+            event: "payment.registration.completed",
+            userId: payment.user.id,
+            tandaId: tandaInfo.id,
+            tandaName: tandaInfo.name,
+            amount: payment.amount,
+            paidPeriods,
+            creditBalance: newCreditBalance,
+            nextPayment: formatMexicoCityDate(nextPayment),
+        },
+        "Tanda payment registered",
+    );
+
     return { paidPeriods, nextPayment, newCreditBalance, tandaInfo };
+};
+
+/**
+ * Registers an administrator-granted payment credit for an exact number of
+ * tanda periods. No voucher is attached because this is an administrative
+ * adjustment rather than a user transfer.
+ */
+export const grantTandaPeriods = async (params: {
+    admin: User;
+    user: User;
+    tandaId: string;
+    periods: number;
+}): Promise<{
+    tanda: Tanda;
+    amount: number;
+    nextPayment: Date;
+    title: string;
+}> => {
+    if (!Number.isInteger(params.periods) || params.periods <= 0) {
+        throw new Error("Granted periods must be a positive integer");
+    }
+
+    const tanda = await getTandaById(params.tandaId);
+    if (!tanda || !tanda.isActive) {
+        throw new Error("The selected tanda is not active");
+    }
+
+    if (!params.user.tandaIds.includes(tanda.id)) {
+        throw new Error("The selected user is not a member of this tanda");
+    }
+
+    const tandaType =
+        (tanda.suscriptionType as SUSCRIPTION_TYPES) ||
+        SUSCRIPTION_TYPES.MONTHLY;
+    const [lastPayments, legal] = await Promise.all([
+        getLastUserTandaPayments(params.user.id, tanda.id, 1),
+        getUserTandaLegal(params.user.id, tanda.id),
+    ]);
+    const now = new Date();
+    const baseDate =
+        lastPayments[0]?.nextPayment ??
+        legal?.startDate ??
+        getCurrentCycleCutoffDate(tanda.paymentDay, now, tandaType);
+    const nextPayment = getNextPaymentDateFromPayment(
+        baseDate,
+        params.periods,
+        tandaType,
+        tanda.paymentDay,
+    );
+    const amount = roundCurrency(tanda.costPerUser * params.periods);
+    const periodLabel =
+        tandaType === SUSCRIPTION_TYPES.ANNUAL
+            ? params.periods === 1
+                ? "año"
+                : "años"
+            : params.periods === 1
+              ? "mes"
+              : "meses";
+    const title = `Abono de ${params.periods} ${periodLabel} otorgado por admin ${params.admin.name}`;
+
+    logger.info(
+        {
+            event: "admin.period-gift.started",
+            adminId: params.admin.id,
+            userId: params.user.id,
+            tandaId: tanda.id,
+            periods: params.periods,
+            amount,
+        },
+        "Registering administrator-granted tanda periods",
+    );
+
+    await addPaymentToTanda({
+        title,
+        userId: params.user.id,
+        tandaId: tanda.id,
+        paymentDate: now,
+        payment: amount,
+        nextPayment,
+    });
+
+    await upsertUserTandaLegal({
+        userId: params.user.id,
+        userName: params.user.name,
+        tandaId: tanda.id,
+        tandaName: tanda.name,
+        acceptedRules: legal?.acceptedRules ?? false,
+        creditBalance: legal?.creditBalance ?? 0,
+    });
+
+    logger.info(
+        {
+            event: "admin.period-gift.completed",
+            adminId: params.admin.id,
+            userId: params.user.id,
+            tandaId: tanda.id,
+            periods: params.periods,
+            amount,
+            nextPayment: formatMexicoCityDate(nextPayment),
+        },
+        "Administrator-granted tanda periods registered",
+    );
+
+    return { tanda, amount, nextPayment, title };
 };
 
 /**

@@ -48,7 +48,13 @@ const processAiMessage = async (
         try {
             await withTyping(ctx, provider, async () => {
                 logger.info(
-                    `Answering message with AI from user ${userInfo!.name}: ${combinedBody}`,
+                    {
+                        event: "ai.request.started",
+                        userId: userInfo!.id,
+                        userName: userInfo!.name,
+                        messageLength: combinedBody.length,
+                    },
+                    "Processing user request with AI",
                 );
 
                 const activeTandas = await getActiveTandas();
@@ -69,7 +75,13 @@ const processAiMessage = async (
 
                 const aiResponse: AIResponse = JSON.parse(response.text);
                 logger.info(
-                    `AI response for user ${userInfo!.name}: ${aiResponse.messageToUser}`,
+                    {
+                        event: "ai.request.completed",
+                        userId: userInfo!.id,
+                        hasMessage: Boolean(aiResponse.messageToUser),
+                        startCommand: aiResponse.startCommand || undefined,
+                    },
+                    "AI response generated",
                 );
 
                 if (aiResponse.messageToUser) {
@@ -77,12 +89,18 @@ const processAiMessage = async (
                 }
 
                 if (aiResponse.startCommand) {
-                    logger.info(
-                        `AI redirecting user ${userInfo!.name} to: ${aiResponse.startCommand}`,
-                    );
                     const route = getFlowByCommandName(aiResponse.startCommand);
 
                     if (route) {
+                        logger.info(
+                            {
+                                event: "ai.route.resolved",
+                                userId: userInfo!.id,
+                                startCommand: aiResponse.startCommand,
+                                selectedTandaName: route.selectedTandaName,
+                            },
+                            "Routing AI request to bot flow",
+                        );
                         if (route.selectedTandaName) {
                             await state.update({
                                 selectedTandaName: route.selectedTandaName,
@@ -93,11 +111,17 @@ const processAiMessage = async (
                 }
             });
         } catch (error) {
-            logger.error(error);
+            logger.error(
+                { err: error, event: "ai.request.failed" },
+                "AI request failed",
+            );
             await flowDynamic(AI_ERROR_MESSAGE);
         }
     } catch (error) {
-        logger.error(error);
+        logger.error(
+            { err: error, event: "ai.request.unhandled" },
+            "Unhandled error while processing AI request",
+        );
         await flowDynamic(GENERIC_ERROR_MESSAGE);
     }
 };

@@ -125,7 +125,10 @@ export const createMessageQueue = (gapMilliseconds = 1500) => {
             try {
                 await onFlush(combinedBody, latestCtx);
             } catch (error) {
-                logger.error(`Error flushing message queue for ${from}: ${String(error)}`);
+                logger.error(
+                    { err: error, event: "message-queue.flush.failed", userId: from },
+                    "Could not process queued user messages",
+                );
             }
         }, gapMilliseconds);
 

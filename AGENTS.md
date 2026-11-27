@@ -126,7 +126,7 @@ Gemini siempre responde un objeto JSON validado por esquema:
 
 ### Comandos soportados (`src/enums/bot-commands.ts`)
 - **Generales**: `menú`, `menu`, `datos de pago` (exclusivamente para pagos de tandas).
-- **Admin**: `mensaje a grupo`, `mensaje personalizado`, `estatus tandas`, `reenviar recordatorios tandas`, `estatus usuario`, `cambiar precio tanda`, `cambiar contraseña tanda`.
+- **Admin**: `mensaje a grupo`, `mensaje personalizado`, `estatus tandas`, `reenviar recordatorios tandas`, `estatus usuario`, `regalar periodos`, `cambiar precio tanda`, `cambiar contraseña tanda`.
 - **Por tanda**: `pagar <tanda>`, `mi <tanda>`, `reglamento <tanda>`. Se resuelven mediante el nombre normalizado de una tanda activa de Notion.
 
 ---

@@ -10,6 +10,7 @@ export enum BOT_COMMANDS {
     TANDA_STATUS = "estatus tandas",
     RESEND_TANDA_REMINDERS = "reenviar recordatorios tandas",
     USER_STATUS = "estatus usuario",
+    GRANT_TANDA_PERIODS = "regalar periodos",
     CHANGE_TANDA_PRICE = "cambiar precio tanda",
     CHANGE_TANDA_PASSWORD = "cambiar contraseña tanda",
     CHANGE_TANDA_PASSWORD_WITHOUT_TILDE = "cambiar contrasena tanda",

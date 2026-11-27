@@ -29,6 +29,7 @@ Resueltos dinámicamente por prefijo + nombre normalizado de tanda:
 - `estatus tandas`: Resumen general de todas las tandas activas, deudores, montos pendientes y dinero recaudado.
 - `reenviar recordatorios tandas`: Ejecuta manualmente el envío de recordatorios diarios (incluyendo el aviso de suspensión definitiva por falta de pago).
 - `estatus usuario` *(Nuevo)*: Solicita seleccionar/buscar usuario y muestra por cada tanda asignada sus últimos 3 pagos (fecha, monto, periodos), su saldo a favor actual, periodos pendientes y monto total adeudado.
+- `regalar periodos` *(Nuevo)*: Solicita usuario, tanda y cantidad de periodos completos. Registra en `Listado de Pagos` un abono sin comprobante por el importe equivalente y con el título `Abono de <N> periodos otorgado por admin <Nombre admin>`.
 - `cambiar precio tanda` *(Nuevo)*: Solicita seleccionar tanda y nuevo costo total (`Costo tanda`); actualiza Notion, recalcula pagos adelantados vigentes y saldo a favor de los miembros afectados, y muestra resumen al admin.
 - `cambiar contraseña tanda` *(Nuevo)*: Solicita seleccionar tanda y nueva contraseña; actualiza `"password"` en Notion, envía la nueva contraseña únicamente a miembros sin adeudos, e informa al admin quién la recibió y quién no.
 

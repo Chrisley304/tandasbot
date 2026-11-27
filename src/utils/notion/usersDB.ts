@@ -60,7 +60,13 @@ export const getUserFromPhone = async (
     const cleanPhone = userPhone.replace(/[^\d]/g, "");
     if (!cleanPhone) return null;
 
-    logger.info(`mensaje de ${cleanPhone}`);
+    logger.debug(
+        {
+            event: "notion.user.lookup.phone",
+            phoneLast4: cleanPhone.slice(-4),
+        },
+        "Looking up user by phone",
+    );
 
     const dataSourceId = getUsersDataSourceId();
     const candidates = [cleanPhone];

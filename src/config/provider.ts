@@ -17,14 +17,18 @@ export const initProvider = async () => {
         if (result?.version) {
             version = result.version;
             logger.info(
-                `Resolved latest WhatsApp Web version: ${version.join(".")} (isLatest: ${result.isLatest})`,
+                {
+                    event: "provider.version.resolved",
+                    version: version.join("."),
+                    isLatest: result.isLatest,
+                },
+                "Resolved WhatsApp Web version",
             );
         }
     } catch (error) {
         logger.warn(
-            `Could not fetch latest WhatsApp Web version automatically, falling back to provider default: ${String(
-                error,
-            )}`,
+            { err: error, event: "provider.version.fallback" },
+            "Could not resolve the WhatsApp Web version; using provider default",
         );
     }
 
@@ -38,6 +42,15 @@ export const initProvider = async () => {
         BaileysProvider,
         ConstructorParameters<typeof BaileysProvider>[0]
     >(BaileysProvider, options);
+
+    logger.info(
+        {
+            event: "provider.initialized",
+            experimentalStore: true,
+            sessionReleaseMs: 10_800_000,
+        },
+        "WhatsApp provider initialized",
+    );
 
     return provider;
 };
