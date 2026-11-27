@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-11-26
+
 ### Added
 
 - Added the admin-only `regalar periodos` flow to grant paid tanda periods without a voucher, recording the credited amount and the responsible administrator in Notion.
