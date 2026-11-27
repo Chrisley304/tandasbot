@@ -1,6 +1,9 @@
-dist/*
-node_modules
-.env
+dist/
+node_modules/
+.env*
+.git/
+*.log*
+coverage/
 
 *_sessions
 *tokens
