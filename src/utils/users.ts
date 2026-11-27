@@ -36,14 +36,14 @@ export const isUserAllowed = (
 export const sendMessagesToUser = async (
     user: User,
     messages: Message[],
-): Promise<void> => {
+): Promise<boolean> => {
     try {
         if (!user.phone || user.phone.length < 10) {
             logger.warn(
                 { event: "message.send.skipped", userId: user.id, reason: "invalid_phone" },
                 "Message was not sent because the recipient has an invalid phone",
             );
-            return;
+            return false;
         }
 
         const userPhone = "+" + user.phone;
@@ -62,11 +62,13 @@ export const sendMessagesToUser = async (
             { event: "message.send.completed", userId: user.id, messages: messages.length },
             "Message delivery completed",
         );
+        return true;
     } catch (error) {
         logger.error(
             { err: error, event: "message.send.failed", userId: user.id },
             "Could not send message to user",
         );
+        return false;
     }
 };
 

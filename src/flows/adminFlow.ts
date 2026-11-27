@@ -536,12 +536,26 @@ export const grantTandaPeriodsHandler = addKeyword(EVENTS.ACTION)
                             : periods === 1
                               ? "mes"
                               : "meses";
+                    const nextPayment = formatMexicoCityDate(result.nextPayment);
+                    const userWasNotified = await sendMessagesToUser(targetUser, [
+                        {
+                            body: [
+                                "🎁 *¡Recibiste un abono de tanda!*",
+                                `El administrador *${admin.name}* te otorgó *${periods} ${periodLabel}* de *${result.tanda.name}*.`,
+                                `💵 *Monto abonado:* ${pesosFormatter.format(result.amount)}.`,
+                                `📅 *Tu próximo pago:* ${nextPayment}.`,
+                            ].join("\n"),
+                        },
+                    ]);
                     await flowDynamic(
                         [
                             `✅ Se otorgaron *${periods} ${periodLabel}* de *${result.tanda.name}* a *${targetUser.name}*.`,
                             `💵 *Monto del abono:* ${pesosFormatter.format(result.amount)}.`,
                             `📝 *Descripción:* ${result.title}.`,
-                            `📅 *Siguiente pago:* ${formatMexicoCityDate(result.nextPayment)}.`,
+                            `📅 *Siguiente pago:* ${nextPayment}.`,
+                            userWasNotified
+                                ? "📩 Se envió un aviso al usuario."
+                                : "⚠️ El abono se registró, pero no se pudo enviar el aviso al usuario.",
                         ].join("\n"),
                     );
                 });
