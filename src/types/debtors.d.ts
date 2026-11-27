@@ -1,6 +1,8 @@
-import { User } from "./notion/usersDB";
+import type { User } from "./notion/usersDB";
 
-export type Deptor = {
-    user: User;
+export interface Deptor {
     missingPayments: number;
-};
+    totalAmountOwed: number;
+    creditBalance: number;
+    user: User;
+}

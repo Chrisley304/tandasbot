@@ -1,6 +1,10 @@
 import dotenv from "dotenv";
 import { type GenerateContentConfig, GoogleGenAI } from "@google/genai";
-import botInstructionsMd from "./aiContext.md";
+import type { Tanda } from "@custom-types/notion/tandasDB";
+import { SUSCRIPTION_TYPES } from "@enums/suscriptions";
+import { getMexicoCityDateParts } from "@utils/datetimes";
+import { pesosFormatter } from "@utils/misc";
+import botInstructionsTemplate from "./aiContext.md";
 
 dotenv.config();
 
@@ -8,8 +12,42 @@ export const aiModel = new GoogleGenAI({
     apiKey: process.env.GEMINI_API_KEY,
 });
 
-export const aiModelConfig: GenerateContentConfig = {
-    systemInstruction: botInstructionsMd,
+const formatTandasContext = (activeTandas: Tanda[]): string => {
+    if (activeTandas.length === 0) {
+        return "_No hay tandas activas registradas actualmente._";
+    }
+
+    return activeTandas
+        .map((tanda) => {
+            const lowerName = tanda.name.toLowerCase();
+            const cost = pesosFormatter.format(tanda.costPerUser);
+            const { day, month } = getMexicoCityDateParts(tanda.paymentDay);
+            const recurrenceLabel =
+                tanda.suscriptionType === SUSCRIPTION_TYPES.ANNUAL
+                    ? `anual (día ${day}/${month})`
+                    : `mensual (día ${day} de cada mes)`;
+            const rulesText = tanda.rules?.trim()
+                ? tanda.rules.trim()
+                : "Sin reglamento personalizado.";
+
+            return [
+                `### Tanda: ${tanda.name}`,
+                `- Recurrencia: ${recurrenceLabel}`,
+                `- Costo por miembro: ${cost}`,
+                `- Comandos: \`pagar ${lowerName}\`, \`mi ${lowerName}\`, \`reglamento ${lowerName}\``,
+                `- Reglamento: ${rulesText}`,
+            ].join("\n");
+        })
+        .join("\n\n");
+};
+
+export const buildAiModelConfig = (
+    activeTandas: Tanda[],
+): GenerateContentConfig => ({
+    systemInstruction: botInstructionsTemplate.replace(
+        "{{TANDAS_CONTEXT}}",
+        formatTandasContext(activeTandas),
+    ),
     responseMimeType: "application/json",
     responseSchema: {
         type: "object",
@@ -28,4 +66,4 @@ export const aiModelConfig: GenerateContentConfig = {
         propertyOrdering: ["messageToUser", "startCommand"],
         required: ["startCommand"],
     },
-};
+});

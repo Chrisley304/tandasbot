@@ -1,4 +1,3 @@
-import type { User } from "@custom-types/notion/usersDB";
 import type { QueryDataSourceResponse } from "@notionhq/client/build/src/api-endpoints";
 import type { Tanda, TandasDatabaseItem } from "@custom-types/notion/tandasDB";
 import type {
@@ -9,10 +8,35 @@ import type {
 import dotenv from "dotenv";
 import { notionClient } from "./client";
 
-import { textToSnakeCase } from "../misc";
-import { getMexicoCityISODate } from "../datetimes";
+import { normalizeTandaName } from "../misc";
+import { getMexicoCityISODate, parseNotionDate } from "../datetimes";
 
 dotenv.config();
+
+const TANDAS_CACHE_TTL_MS = 60_000;
+let cachedTandas: Tanda[] | null = null;
+let cachedTandasTimestamp = 0;
+
+export const invalidateTandasCache = () => {
+    cachedTandas = null;
+    cachedTandasTimestamp = 0;
+};
+
+const getTandasListDataSourceId = (): string => {
+    const { NOTION_TANDAS_LIST_DATASOURCE_ID } = process.env;
+    if (!NOTION_TANDAS_LIST_DATASOURCE_ID) {
+        throw new Error("Missing NOTION_TANDAS_LIST_DATASOURCE_ID");
+    }
+    return NOTION_TANDAS_LIST_DATASOURCE_ID;
+};
+
+const getPaymentsDataSourceId = (): string => {
+    const { NOTION_TANDAS_PAYMENTS_DATASOURCE_ID } = process.env;
+    if (!NOTION_TANDAS_PAYMENTS_DATASOURCE_ID) {
+        throw new Error("Missing NOTION_TANDAS_PAYMENTS_DATASOURCE_ID");
+    }
+    return NOTION_TANDAS_PAYMENTS_DATASOURCE_ID;
+};
 
 /**
  * Extracts tanda data from a Notion API response.
@@ -21,17 +45,28 @@ const extractTandasData = (response: QueryDataSourceResponse): Tanda[] => {
     const databaseItems = response.results as TandasDatabaseItem[];
 
     return databaseItems.map((dbItem) => {
-        const name = dbItem.properties.name.title[0].plain_text;
+        const name = dbItem.properties["Nombre tanda"]?.title?.[0]?.plain_text || "";
         const suscriptionType =
-            dbItem.properties.suscription_type.select.name || "";
+            dbItem.properties.Recurrencia?.select?.name || "monthly";
+        const totalCost = dbItem.properties["Costo tanda"]?.number || 0;
+        const nMembers = dbItem.properties["Numero de miembros"]?.number || 1;
         const costPerUser =
-            dbItem.properties.cost_per_member.formula.number || 0;
-        const paymentDay = new Date(dbItem.properties.payment_day.date.start);
-        const totalCost = dbItem.properties.total_cost.number || 0;
-        const nMembers = dbItem.properties.n_members.number || 0;
-        const isActive = dbItem.properties.is_active.checkbox || false;
+            dbItem.properties["Costo por miembro"]?.formula?.number ??
+            totalCost / Math.max(1, nMembers);
+        const paymentDay = dbItem.properties["Dia de pago"]?.date?.start
+            ? parseNotionDate(dbItem.properties["Dia de pago"].date.start)
+            : new Date();
+        const isActive = dbItem.properties["Activo?"]?.checkbox || false;
+        const password =
+            dbItem.properties.password?.rich_text
+                ?.map((rt) => rt.plain_text)
+                .join("") || "";
+        const rules =
+            dbItem.properties["Reglas tanda"]?.rich_text
+                ?.map((rt) => rt.plain_text)
+                .join("") || "";
 
-        const item = {
+        return {
             id: dbItem.id,
             name,
             suscriptionType,
@@ -40,179 +75,114 @@ const extractTandasData = (response: QueryDataSourceResponse): Tanda[] => {
             totalCost,
             nMembers,
             isActive,
+            password,
+            rules,
         };
-        return item;
     });
 };
 
 /**
- * Gets all tandas from the Notion database.
+ * Gets all tandas from the Notion database (with short in-memory cache).
  */
-export const getAllTandas = async (): Promise<Tanda[]> => {
-    const { NOTION_TANDAS_LIST_DATASOURCE_ID } = process.env;
-
-    if (!NOTION_TANDAS_LIST_DATASOURCE_ID) {
-        throw new Error("Missing NOTION_TANDAS_LIST_DATASOURCE_ID");
+export const getAllTandas = async (forceRefresh = false): Promise<Tanda[]> => {
+    const now = Date.now();
+    if (
+        !forceRefresh &&
+        cachedTandas &&
+        now - cachedTandasTimestamp < TANDAS_CACHE_TTL_MS
+    ) {
+        return cachedTandas;
     }
 
     const response = await notionClient.dataSources.query({
-        data_source_id: NOTION_TANDAS_LIST_DATASOURCE_ID,
+        data_source_id: getTandasListDataSourceId(),
     });
 
-    return extractTandasData(response);
+    cachedTandas = extractTandasData(response);
+    cachedTandasTimestamp = now;
+    return cachedTandas;
 };
 
 /**
- * Gets a tanda by its name.
+ * Gets all active tandas from the Notion database.
+ */
+export const getActiveTandas = async (
+    forceRefresh = false,
+): Promise<Tanda[]> => {
+    const tandas = await getAllTandas(forceRefresh);
+    return tandas.filter((tanda) => tanda.isActive);
+};
+
+/**
+ * Finds a tanda by its Notion page ID.
+ */
+export const getTandaById = async (tandaId: string): Promise<Tanda | null> => {
+    const tandas = await getAllTandas();
+    return tandas.find((t) => t.id === tandaId) || null;
+};
+
+/**
+ * Finds a tanda by name using normalized comparison (ignores emojis, accents, case).
  */
 export const getTandaByName = async (
-    tandaName: string
+    tandaName: string,
 ): Promise<Tanda | null> => {
-    const { NOTION_TANDAS_LIST_DATASOURCE_ID } = process.env;
+    const tandas = await getAllTandas();
+    const target = normalizeTandaName(tandaName);
+    if (!target) return null;
 
-    if (!NOTION_TANDAS_LIST_DATASOURCE_ID) {
-        throw new Error("Missing NOTION_TANDAS_LIST_DATASOURCE_ID");
-    }
-
-    const response = await notionClient.dataSources.query({
-        data_source_id: NOTION_TANDAS_LIST_DATASOURCE_ID,
-        filter: {
-            property: "name",
-            title: {
-                equals: tandaName,
-            },
-        },
-    });
-
-    if (response.results.length === 0) {
-        return null;
-    }
-
-    const tanda = extractTandasData(response);
-    return tanda[0];
+    return (
+        tandas.find((t) => normalizeTandaName(t.name) === target) ||
+        tandas.find((t) => normalizeTandaName(t.name).includes(target)) ||
+        null
+    );
 };
 
 /**
  * Extracts tanda payments data from a Notion API response.
  */
 const extractTandaPaymentsData = (
-    response: QueryDataSourceResponse
+    response: QueryDataSourceResponse,
 ): TandaPayment[] => {
     const databaseItems = response.results as TandasPaymentsDBItem[];
 
-    return databaseItems.map((dbItem) => {
-        const title = dbItem.properties.title.title[0].plain_text;
-        const overduePayment =
-            dbItem.properties.overdue_payment.formula.boolean || false;
-        const userId = dbItem.properties.user.relation[0].id;
-        const tanda = dbItem.properties.tanda.select.name;
-        const paymentDate = new Date(dbItem.properties.payment_date.date.start);
-        const payment = dbItem.properties.payment.number || 0;
-        const paidPeriods = dbItem.properties.paid_periods.number;
-        const nextPayment = new Date(dbItem.properties.next_payment.date.start);
-        const voucherPath =
-            dbItem.properties.voucher_path.rich_text.length > 0
-                ? dbItem.properties.voucher_path.rich_text[0].plain_text
-                : "";
-
-        return {
-            id: dbItem.id,
-            title,
-            overduePayment,
-            userId,
-            tanda,
-            paymentDate,
-            payment,
-            paidPeriods,
-            nextPayment,
-            voucherPath,
-        };
-    });
+    return databaseItems.map((dbItem) => ({
+        id: dbItem.id,
+        title: dbItem.properties.Titulo?.title?.[0]?.plain_text || "",
+        overduePayment:
+            dbItem.properties["Vencido?"]?.formula?.boolean || false,
+        userId: dbItem.properties.Usuario?.relation?.[0]?.id || "",
+        tandaId: dbItem.properties.Tanda?.relation?.[0]?.id || "",
+        paymentDate: dbItem.properties["Fecha pago"]?.date?.start
+            ? parseNotionDate(dbItem.properties["Fecha pago"].date.start)
+            : new Date(),
+        payment: dbItem.properties.Monto?.number || 0,
+        paidPeriods:
+            dbItem.properties["Periodos pagados"]?.formula?.number ?? undefined,
+        nextPayment: dbItem.properties["Siguiente pago"]?.date?.start
+            ? parseNotionDate(dbItem.properties["Siguiente pago"].date.start)
+            : new Date(),
+    }));
 };
 
 /**
- * Gets the valid payments (not due) of a user in a tanda.
- * @param userId - The ID of the user.
- * @param tandaName - The name of the tanda.
- * @returns A promise that resolves to an array of tanda payments or null if none found.
- */
-export const getUserTandaValidPayments = async (
-    userId: string,
-    tandaName: string
-): Promise<TandaPayment[] | null> => {
-    const { NOTION_TANDAS_PAYMENTS_DATASOURCE_ID } = process.env;
-
-    if (!NOTION_TANDAS_PAYMENTS_DATASOURCE_ID) {
-        throw new Error("Missing NOTION_TANDAS_PAYMENTS_DATASOURCE_ID");
-    }
-
-    const response = await notionClient.dataSources.query({
-        data_source_id: NOTION_TANDAS_PAYMENTS_DATASOURCE_ID,
-        filter: {
-            and: [
-                {
-                    property: "user",
-                    relation: {
-                        contains: userId,
-                    },
-                },
-                {
-                    property: "tanda",
-                    select: {
-                        equals: tandaName,
-                    },
-                },
-                {
-                    property: "overdue_payment",
-                    formula: {
-                        checkbox: {
-                            equals: false,
-                        },
-                    },
-                },
-            ],
-        },
-        sorts: [
-            {
-                property: "next_payment",
-                direction: "descending",
-            },
-        ],
-    });
-
-    if (response.results.length === 0) {
-        return null;
-    }
-
-    return extractTandaPaymentsData(response);
-};
-
-/**
- * Gets the valid payments (not due) of a user in a tanda.
- * @param tandaName - The name of the tanda.
- * @returns A promise that resolves to an array of tanda payments or null if none found.
+ * Gets the valid payments (not overdue) of a tanda by tandaId.
  */
 export const getTandaValidPayments = async (
-    tandaName: string
-): Promise<TandaPayment[] | null> => {
-    const { NOTION_TANDAS_PAYMENTS_DATASOURCE_ID } = process.env;
-
-    if (!NOTION_TANDAS_PAYMENTS_DATASOURCE_ID) {
-        throw new Error("Missing NOTION_TANDAS_PAYMENTS_DATASOURCE_ID");
-    }
-
+    tandaId: string,
+): Promise<TandaPayment[]> => {
     const response = await notionClient.dataSources.query({
-        data_source_id: NOTION_TANDAS_PAYMENTS_DATASOURCE_ID,
+        data_source_id: getPaymentsDataSourceId(),
         filter: {
             and: [
                 {
-                    property: "tanda",
-                    select: {
-                        equals: tandaName,
+                    property: "Tanda",
+                    relation: {
+                        contains: tandaId,
                     },
                 },
                 {
-                    property: "overdue_payment",
+                    property: "Vencido?",
                     formula: {
                         checkbox: {
                             equals: false,
@@ -223,180 +193,175 @@ export const getTandaValidPayments = async (
         },
         sorts: [
             {
-                property: "next_payment",
+                property: "Siguiente pago",
                 direction: "descending",
             },
         ],
     });
 
-    if (response.results.length === 0) {
-        return null;
-    }
-
     return extractTandaPaymentsData(response);
 };
 
 /**
- * Gets the last 3 payments of a user in a tanda.
- * @param userId - The ID of the user.
- * @param tandaName - The name of the tanda.
- * @returns A promise that resolves to an array of tanda payments or null if none found.
+ * Gets the last N payments of a user in a tanda (ordered by Siguiente pago desc).
  */
 export const getLastUserTandaPayments = async (
     userId: string,
-    tandaName: string
-): Promise<TandaPayment[] | null> => {
-    const { NOTION_TANDAS_PAYMENTS_DATASOURCE_ID } = process.env;
-
-    if (!NOTION_TANDAS_PAYMENTS_DATASOURCE_ID) {
-        throw new Error("Missing NOTION_TANDAS_PAYMENTS_DATASOURCE_ID");
-    }
-
+    tandaId: string,
+    limit = 3,
+): Promise<TandaPayment[]> => {
     const response = await notionClient.dataSources.query({
-        data_source_id: NOTION_TANDAS_PAYMENTS_DATASOURCE_ID,
-        page_size: 3,
+        data_source_id: getPaymentsDataSourceId(),
+        page_size: limit,
         filter: {
             and: [
                 {
-                    property: "user",
+                    property: "Usuario",
                     relation: {
                         contains: userId,
                     },
                 },
                 {
-                    property: "tanda",
-                    select: {
-                        equals: tandaName,
+                    property: "Tanda",
+                    relation: {
+                        contains: tandaId,
                     },
                 },
             ],
         },
         sorts: [
             {
-                property: "next_payment",
+                property: "Siguiente pago",
                 direction: "descending",
             },
         ],
     });
 
-    if (response.results.length === 0) {
-        return null;
-    }
-
     return extractTandaPaymentsData(response);
 };
 
 /**
- * Add a new payment to the Notion database
- * @param payment - The payment to add.
+ * Adds a new payment to the Listado de Pagos database in Notion.
  */
 export const addPaymentToTanda = async (payment: TandaPayment) => {
-    const { NOTION_TANDAS_PAYMENTS_DATASOURCE_ID } = process.env;
+    const properties: Record<string, unknown> = {
+        Titulo: {
+            title: [
+                {
+                    text: {
+                        content: payment.title,
+                    },
+                },
+            ],
+        },
+        Usuario: {
+            relation: [{ id: payment.userId }],
+        },
+        Tanda: {
+            relation: [{ id: payment.tandaId }],
+        },
+        "Fecha pago": {
+            date: {
+                start: getMexicoCityISODate(payment.paymentDate),
+            },
+        },
+        Monto: {
+            number: payment.payment,
+        },
+        "Siguiente pago": {
+            date: {
+                start: getMexicoCityISODate(payment.nextPayment),
+            },
+        },
+    };
 
-    if (!NOTION_TANDAS_PAYMENTS_DATASOURCE_ID) {
-        throw new Error("Missing NOTION_TANDAS_PAYMENTS_DATASOURCE_ID");
+    if (payment.voucherFileUploadId) {
+        properties.Comprobante = {
+            type: "files",
+            files: [
+                {
+                    type: "file_upload",
+                    file_upload: {
+                        id: payment.voucherFileUploadId,
+                    },
+                },
+            ],
+        };
     }
 
     await notionClient.pages.create({
         parent: {
             type: "data_source_id",
-            data_source_id: NOTION_TANDAS_PAYMENTS_DATASOURCE_ID,
+            data_source_id: getPaymentsDataSourceId(),
         },
         icon: {
             type: "emoji",
             emoji: "💵",
         },
+        // @ts-ignore
+        properties,
+    });
+};
+
+/**
+ * Updates the "Siguiente pago" date on an existing payment record.
+ */
+export const updatePaymentNextPaymentDate = async (
+    paymentId: string,
+    nextPayment: Date,
+): Promise<void> => {
+    await notionClient.pages.update({
+        page_id: paymentId,
         properties: {
-            title: {
-                title: [
-                    {
-                        text: {
-                            content: payment.title,
-                        },
-                    },
-                ],
-            },
-            user: {
-                // @ts-ignore
-                relation: [
-                    {
-                        id: payment.userId,
-                    },
-                ],
-            },
-            tanda: {
-                // @ts-ignore
-                select: {
-                    name: payment.tanda,
-                },
-            },
-            payment_date: {
+            "Siguiente pago": {
                 // @ts-ignore
                 date: {
-                    start: getMexicoCityISODate(payment.paymentDate),
+                    start: getMexicoCityISODate(nextPayment),
                 },
-            },
-            payment: {
-                // @ts-ignore
-                number: payment.payment,
-            },
-            paid_periods: {
-                // @ts-ignore
-                number: payment.paidPeriods,
-            },
-            next_payment: {
-                // @ts-ignore
-                date: {
-                    start: getMexicoCityISODate(payment.nextPayment),
-                },
-            },
-            voucher_path: {
-                // @ts-ignore
-                rich_text: [
-                    {
-                        type: "text",
-                        text: {
-                            content: payment.voucherPath,
-                        },
-                    },
-                ],
-            },
-            voucher_image: {
-                type: "files",
-                files: [
-                    {
-                        type: "file_upload",
-                        file_upload: {
-                            id: payment.voucherFileUploadId,
-                        },
-                    },
-                ],
             },
         },
     });
 };
 
 /**
- * Marks that a user has accepted the terms of a tanda.
- * @param {string} tandaName - The name of the tanda.
- * @param user - The user who accepted the terms.
+ * Updates "Costo tanda" for a tanda in Notion and invalidates cache.
  */
-export const userAcceptTandaTermsHandler = async (
-    tandaName: string,
-    user: User
-) => {
-    const { NOTION_USERS_DATASOURCE_ID } = process.env;
-
-    if (!NOTION_USERS_DATASOURCE_ID) {
-        throw new Error("Missing NOTION_USERS_DATASOURCE_ID");
-    }
-
+export const updateTandaPrice = async (
+    tandaId: string,
+    newTotalCost: number,
+): Promise<void> => {
     await notionClient.pages.update({
-        page_id: user.id,
+        page_id: tandaId,
         properties: {
-            [`accepted_${textToSnakeCase(tandaName)}_terms`]: {
-                checkbox: true,
+            "Costo tanda": {
+                number: newTotalCost,
             },
         },
     });
+    invalidateTandasCache();
+};
+
+/**
+ * Updates "password" for a tanda in Notion and invalidates cache.
+ */
+export const updateTandaPassword = async (
+    tandaId: string,
+    newPassword: string,
+): Promise<void> => {
+    await notionClient.pages.update({
+        page_id: tandaId,
+        properties: {
+            password: {
+                rich_text: [
+                    {
+                        type: "text",
+                        text: {
+                            content: newPassword,
+                        },
+                    },
+                ],
+            },
+        },
+    });
+    invalidateTandasCache();
 };

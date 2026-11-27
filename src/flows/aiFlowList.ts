@@ -1,80 +1,82 @@
+import type { TFlow } from "@builderbot/bot/dist/types";
+import { BOT_COMMANDS, TANDA_COMMAND_PREFIXES } from "@enums/bot-commands";
+import { normalizeTandaName } from "@utils/misc";
 import { menuFlow } from "./generalFlow";
 import {
-    sendMessageToGroupFlow,
+    changeTandaPasswordFlow,
+    changeTandaPriceFlow,
     getTandasStatusFlow,
-    sendMessageToUserFlow,
     sendDailyRemindersFlow,
+    sendMessageToGroupFlow,
+    sendMessageToUserFlow,
+    userDebtLookupFlow,
 } from "./adminFlow";
 import {
-    amazonPrimeStatusFlow,
     chrisPaymentInfoFlow,
-    maxStatusFlow,
-    registerSpotifyPayment,
-    spotifyStatusFlow,
-    registerMaxPayment,
-    spotifyRulesFlow,
-    maxRulesFlow,
-    amazonPrimeRulesFlow,
-    registerAmazonPayment,
-    youtubeRulesFlow,
-    youtubePremiumStatusFlow,
-    registerYoutubePremiumPayment,
+    tandaPaymentEntryFlow,
+    tandaRulesFlow,
+    tandaStatusFlow,
 } from "./tandasFlow";
-import { BOT_COMMANDS } from "@enums/bot-commands";
 
-export const getFlowByCommandName = (commandName: string) => {
-    switch (commandName) {
-        // All users
+export interface CommandRoute {
+    flow: TFlow;
+    selectedTandaName?: string;
+}
+
+export const getFlowByCommandName = (
+    commandName: string,
+): CommandRoute | null => {
+    const trimmed = commandName.trim();
+    const normalized = normalizeTandaName(trimmed);
+
+    switch (normalized) {
         case BOT_COMMANDS.MENU:
         case BOT_COMMANDS.MENU_WITHOUT_ACCENTS:
-            return menuFlow;
+        case "menu":
+            return { flow: menuFlow };
         case BOT_COMMANDS.PAYMENT_DETAILS:
-            return chrisPaymentInfoFlow;
-
-        // Admin
+            return { flow: chrisPaymentInfoFlow };
         case BOT_COMMANDS.SEND_GROUP_MESSAGE:
-            return sendMessageToGroupFlow;
+            return { flow: sendMessageToGroupFlow };
         case BOT_COMMANDS.SEND_CUSTOM_MESSAGE:
-            return sendMessageToUserFlow;
+            return { flow: sendMessageToUserFlow };
         case BOT_COMMANDS.TANDA_STATUS:
-            return getTandasStatusFlow;
-
+            return { flow: getTandasStatusFlow };
         case BOT_COMMANDS.RESEND_TANDA_REMINDERS:
-            return sendDailyRemindersFlow;
-
-        // Spotify
-        case BOT_COMMANDS.PAY_SPOTIFY:
-            return registerSpotifyPayment;
-        case BOT_COMMANDS.MY_SPOTIFY:
-            return spotifyStatusFlow;
-        case BOT_COMMANDS.SPOTIFY_RULES:
-            return spotifyRulesFlow;
-
-        // HBO Max
-        case BOT_COMMANDS.PAY_HBO_MAX:
-            return registerMaxPayment;
-        case BOT_COMMANDS.MY_HBO_MAX:
-            return maxStatusFlow;
-        case BOT_COMMANDS.HBO_MAX_RULES:
-            return maxRulesFlow;
-
-        // YouTube Premium
-        case BOT_COMMANDS.PAY_YOUTUBE:
-            return registerYoutubePremiumPayment;
-        case BOT_COMMANDS.MY_YOUTUBE:
-            return youtubePremiumStatusFlow;
-        case BOT_COMMANDS.YOUTUBE_PREMIUM_RULES:
-            return youtubeRulesFlow;
-
-        // Amazon Prime
-        case BOT_COMMANDS.PAY_AMAZON:
-            return registerAmazonPayment;
-        case BOT_COMMANDS.MY_AMAZON:
-            return amazonPrimeStatusFlow;
-        case BOT_COMMANDS.AMAZON_PRIME_RULES:
-            return amazonPrimeRulesFlow;
-
+            return { flow: sendDailyRemindersFlow };
+        case BOT_COMMANDS.USER_DEBTS:
+            return { flow: userDebtLookupFlow };
+        case BOT_COMMANDS.CHANGE_TANDA_PRICE:
+            return { flow: changeTandaPriceFlow };
+        case BOT_COMMANDS.CHANGE_TANDA_PASSWORD:
+        case BOT_COMMANDS.CHANGE_TANDA_PASSWORD_WITHOUT_TILDE:
+            return { flow: changeTandaPasswordFlow };
         default:
-            return null;
+            break;
     }
+
+    if (normalized.startsWith(TANDA_COMMAND_PREFIXES.PAY)) {
+        return {
+            flow: tandaPaymentEntryFlow,
+            selectedTandaName: trimmed.slice(TANDA_COMMAND_PREFIXES.PAY.length).trim(),
+        };
+    }
+
+    if (normalized.startsWith(TANDA_COMMAND_PREFIXES.MY)) {
+        return {
+            flow: tandaStatusFlow,
+            selectedTandaName: trimmed.slice(TANDA_COMMAND_PREFIXES.MY.length).trim(),
+        };
+    }
+
+    if (normalized.startsWith(TANDA_COMMAND_PREFIXES.RULES)) {
+        return {
+            flow: tandaRulesFlow,
+            selectedTandaName: trimmed
+                .slice(TANDA_COMMAND_PREFIXES.RULES.length)
+                .trim(),
+        };
+    }
+
+    return null;
 };

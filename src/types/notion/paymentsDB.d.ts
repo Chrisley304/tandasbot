@@ -3,23 +3,20 @@ import type {
     PropertyValueTitle,
     PropertyValueFormula,
     PropertyValueRelation,
-    PropertyValueSelect,
     PropertyValueDate,
     PropertyValueNumber,
-    PropertyValueRichText,
 } from "./responses";
 
 export type TandasPaymentsDBItem = PageObjectResponse & {
     properties: {
-        overdue_payment: PropertyValueFormula;
-        title: PropertyValueTitle;
-        user: PropertyValueRelation;
-        tanda: PropertyValueSelect;
-        payment_date: PropertyValueDate;
-        payment: PropertyValueNumber;
-        paid_periods: PropertyValueNumber;
-        next_payment: PropertyValueDate;
-        voucher_path: PropertyValueRichText;
+        Titulo: PropertyValueTitle;
+        Usuario: PropertyValueRelation;
+        Tanda: PropertyValueRelation;
+        "Fecha pago": PropertyValueDate;
+        Monto: PropertyValueNumber;
+        "Siguiente pago": PropertyValueDate;
+        "Periodos pagados"?: PropertyValueFormula;
+        "Vencido?"?: PropertyValueFormula;
     };
 };
 
@@ -28,11 +25,11 @@ export interface TandaPayment {
     overduePayment?: boolean;
     title: string;
     userId: string;
-    tanda: string;
+    tandaId: string;
+    tandaName?: string;
     paymentDate: Date;
     payment: number;
-    paidPeriods: number;
+    paidPeriods?: number;
     nextPayment: Date;
-    voucherPath: string;
     voucherFileUploadId?: string;
 }

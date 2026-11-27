@@ -2,7 +2,7 @@ import { createBot } from "@builderbot/bot";
 import { schedule } from "node-cron";
 import dotenv from "dotenv";
 
-import { provider } from "./config/provider";
+import { initProvider } from "./config/provider";
 import { database } from "./config/database";
 import { flow } from "./flows";
 import { handleDailyTandasReminders } from "./utils/tandas";
@@ -14,6 +14,8 @@ const PORT = process.env.PORT ?? 3008;
 
 const main = async () => {
     logger.info("Starting bot");
+
+    const provider = await initProvider();
 
     const { httpServer } = await createBot({
         flow,

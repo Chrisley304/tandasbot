@@ -1,4 +1,5 @@
 import { addKeyword, EVENTS } from "@builderbot/bot";
+import type { BotContext } from "@builderbot/bot/dist/types";
 import { JsonFileDB as Database } from "@builderbot/database-json";
 import { BaileysProvider as Provider } from "@builderbot/provider-baileys";
 import dotenv from "dotenv";
@@ -8,76 +9,124 @@ import {
     GENERIC_ERROR_MESSAGE,
     GENERIC_NOT_REGISTERED_MESSAGE,
 } from "@constants/messages";
-import { USER_GROUPS } from "@enums/users";
-import { getUserFromPhone } from "@utils/notion/usersDB";
+import type { AIResponse } from "@custom-types/aiResponse";
+import { aiModel, buildAiModelConfig } from "@config/aiModel";
+import { getActiveTandas } from "@utils/notion/tandasDB";
+import {
+    createMessageQueue,
+    resolveUserFromContext,
+    withTyping,
+} from "@utils/flowHelpers";
 import { isUserAllowed } from "@utils/users";
 import logger from "@utils/logger";
-import { getCleanPhoneNumber } from "@utils/whatsapp";
-import { aiModel, aiModelConfig } from "@config/aiModel";
-import { AIResponse } from "@custom-types/aiResponse";
 import { getFlowByCommandName } from "./aiFlowList";
 
 dotenv.config();
 
-export const aiFlow = addKeyword<Provider, Database>([
-    EVENTS.WELCOME,
-    EVENTS.DOCUMENT,
-    EVENTS.MEDIA,
-]).addAction(async (ctx, { flowDynamic, provider, gotoFlow }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const userInfo =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
+const enqueueMessage = createMessageQueue(1500);
 
-        if (isUserAllowed(userInfo, [USER_GROUPS.ALL])) {
-            try {
+const processAiMessage = async (
+    ctx: BotContext,
+    combinedBody: string,
+    helpers: {
+        flowDynamic: (msg: string | string[]) => Promise<void>;
+        provider: Provider;
+        gotoFlow: (flow: any) => Promise<void>;
+        state: { update: (data: Record<string, unknown>) => Promise<void> };
+    },
+) => {
+    const { flowDynamic, provider, gotoFlow, state } = helpers;
+
+    try {
+        const userInfo = await resolveUserFromContext(ctx);
+
+        if (!isUserAllowed(userInfo)) {
+            await flowDynamic(GENERIC_NOT_REGISTERED_MESSAGE);
+            return;
+        }
+
+        try {
+            await withTyping(ctx, provider, async () => {
                 logger.info(
-                    `Answering message with AI from user ${userInfo.name}: ${ctx.body}`,
+                    `Answering message with AI from user ${userInfo!.name}: ${combinedBody}`,
                 );
-                await provider.vendor.sendPresenceUpdate(
-                    "composing",
-                    ctx.key.remoteJid,
-                );
+
+                const activeTandas = await getActiveTandas();
+                const userTandas = activeTandas
+                    .filter((t) => userInfo!.tandaIds.includes(t.id))
+                    .map((t) => t.name);
 
                 const response = await aiModel.models.generateContent({
                     model: process.env.GEMINI_MODEL_NAME,
                     contents: JSON.stringify({
-                        userName: userInfo.name,
-                        userGroups: userInfo.groups,
-                        userMessage: ctx.body,
+                        userName: userInfo!.name,
+                        isAdmin: userInfo!.isAdmin,
+                        userTandas,
+                        userMessage: combinedBody,
                     }),
-                    config: aiModelConfig,
+                    config: buildAiModelConfig(activeTandas),
                 });
 
                 const aiResponse: AIResponse = JSON.parse(response.text);
                 logger.info(
-                    `AI response for user ${userInfo.name}: ${aiResponse.messageToUser}`,
+                    `AI response for user ${userInfo!.name}: ${aiResponse.messageToUser}`,
                 );
-                await flowDynamic(aiResponse.messageToUser);
+
+                if (aiResponse.messageToUser) {
+                    await flowDynamic(aiResponse.messageToUser);
+                }
 
                 if (aiResponse.startCommand) {
                     logger.info(
-                        `AI redirecting user ${userInfo.name} to: ${aiResponse.startCommand}`,
+                        `AI redirecting user ${userInfo!.name} to: ${aiResponse.startCommand}`,
                     );
-                    const commandFlow = getFlowByCommandName(
-                        aiResponse.startCommand,
-                    );
+                    const route = getFlowByCommandName(aiResponse.startCommand);
 
-                    if (commandFlow) {
-                        return gotoFlow(commandFlow);
+                    if (route) {
+                        if (route.selectedTandaName) {
+                            await state.update({
+                                selectedTandaName: route.selectedTandaName,
+                            });
+                        }
+                        await gotoFlow(route.flow);
                     }
                 }
-            } catch (error) {
-                logger.error(error);
-                await flowDynamic(AI_ERROR_MESSAGE);
-            }
-        } else {
-            await flowDynamic(GENERIC_NOT_REGISTERED_MESSAGE);
+            });
+        } catch (error) {
+            logger.error(error);
+            await flowDynamic(AI_ERROR_MESSAGE);
         }
     } catch (error) {
         logger.error(error);
         await flowDynamic(GENERIC_ERROR_MESSAGE);
     }
+};
+
+export const aiFlow = addKeyword<Provider, Database>([
+    EVENTS.WELCOME,
+    EVENTS.DOCUMENT,
+    EVENTS.MEDIA,
+]).addAction(async (ctx, { flowDynamic, provider, gotoFlow, state }) => {
+    const isMedia = Boolean(
+        ctx.message?.imageMessage || ctx.message?.documentMessage,
+    );
+
+    if (isMedia) {
+        await processAiMessage(ctx, ctx.body || "[Archivo/Comprobante enviado]", {
+            flowDynamic,
+            provider,
+            gotoFlow,
+            state,
+        });
+        return;
+    }
+
+    enqueueMessage(ctx, async (combinedBody, latestCtx) => {
+        await processAiMessage(latestCtx, combinedBody, {
+            flowDynamic,
+            provider,
+            gotoFlow,
+            state,
+        });
+    });
 });

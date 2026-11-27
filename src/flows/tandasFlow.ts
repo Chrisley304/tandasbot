@@ -1,4 +1,5 @@
 import { addKeyword, EVENTS } from "@builderbot/bot";
+import type { BotContext } from "@builderbot/bot/dist/types";
 import { JsonFileDB as Database } from "@builderbot/database-json";
 import { BaileysProvider as Provider } from "@builderbot/provider-baileys";
 
@@ -6,1074 +7,134 @@ import {
     GENERIC_ERROR_MESSAGE,
     GENERIC_NOT_AUTHORIZED_MESSAGE,
     GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE,
+    OPERATION_CANCELLED_MESSAGE,
 } from "@constants/messages";
-import { USER_GROUPS } from "@enums/users";
-import { getUserFromPhone } from "@utils/notion/usersDB";
-import {
-    getLastUserTandaPayments,
-    getTandaByName,
-    userAcceptTandaTermsHandler,
-} from "@utils/notion/tandasDB";
+import { generateTandaRulesMessages } from "@constants/tandasRules";
+import { BOT_COMMANDS } from "@enums/bot-commands";
+import { SUSCRIPTION_TYPES } from "@enums/suscriptions";
+import type { Tanda } from "@custom-types/notion/tandasDB";
+import type { Payment } from "@custom-types/payments";
+import { getTandaByName } from "@utils/notion/tandasDB";
+import { upsertUserTandaLegal } from "@utils/notion/legalsDB";
 import {
     hasUserAcceptedTandaTerms,
     isUserAllowed,
-    sendMessagesToUser,
+    sendMessagesToAdmins,
 } from "@utils/users";
-import { pesosFormatter, toTitleCase } from "@utils/misc";
-import { getUserMissingPayments, handleTandaPayment } from "@utils/tandas";
+import { getUserDebtInfo, handleTandaPayment } from "@utils/tandas";
 import { savePaymentPhoto } from "@utils/files";
-import { Payment } from "@custom-types/payments";
-import { ADMIN_USER } from "@constants/users";
-import { Message } from "@custom-types/messages";
-import { SUSCRIPTION_TYPES } from "@enums/suscriptions";
-import logger from "@utils/logger";
-import { getCleanPhoneNumber } from "@utils/whatsapp";
+import { pesosFormatter } from "@utils/misc";
+import { formatMexicoCityDate, getTenureText } from "@utils/datetimes";
 import {
-    generateAmazonPrimeRulesMessage,
-    generateHBOMaxRulesMessage,
-    generateSpotifyRulesMessage,
-    generateYoutubePremiumRulesMessage,
-} from "@constants/tandasRules";
-import { BOT_COMMANDS } from "@enums/bot-commands";
+    isCancelCommand,
+    resolveUserFromContext,
+    withCancelInstruction,
+    withTyping,
+} from "@utils/flowHelpers";
+import { resetIdle, startIdle, stopIdle } from "./idleFlow";
+import logger from "@utils/logger";
 
-export const spotifyStatusFlow = addKeyword<Provider, Database>(
-    BOT_COMMANDS.MY_SPOTIFY,
-).addAction(async (ctx, { flowDynamic }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-        const tanda = await getTandaByName(USER_GROUPS.SPOTIFY);
-        const currentDatetime = new Date();
-        const currentMonthTandaDate = new Date(
-            Date.UTC(
-                currentDatetime.getFullYear(),
-                currentDatetime.getMonth(),
-                tanda.paymentDay.getDate() + 1,
-            ),
-        );
-        const messages: string[] = [];
-
-        if (isUserAllowed(user, [USER_GROUPS.SPOTIFY])) {
-            if (!hasUserAcceptedTandaTerms(USER_GROUPS.SPOTIFY, user)) {
-                await flowDynamic(
-                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(
-                        USER_GROUPS.SPOTIFY,
-                    ),
-                );
-                return;
-            }
-
-            logger.info(
-                `${user.name} is checking the status of their Spotify payments`,
-            );
-
-            const lastUserPayments = await getLastUserTandaPayments(
-                user.id,
-                USER_GROUPS.SPOTIFY,
-            );
-
-            if (lastUserPayments.length > 0) {
-                if (lastUserPayments[0].nextPayment <= currentMonthTandaDate) {
-                    const missingPayments = await getUserMissingPayments(
-                        tanda,
-                        user,
-                        currentDatetime,
-                        tanda.suscriptionType as SUSCRIPTION_TYPES,
-                    );
-
-                    messages.push(
-                        `¡Este mes *necesitas realizar tu pago* de Spotify 👀! Tienes pendientes ${missingPayments} pago${
-                            missingPayments > 1 ? "s" : ""
-                        }`,
-                    );
-                } else {
-                    messages.push(
-                        `¡Estas *al corriente* con tus pagos de Spotify! 🎉\nTu siguiente pago debe ser antes del *${lastUserPayments[0].nextPayment.toLocaleDateString(
-                            "es-MX",
-                        )}*`,
-                    );
-                }
-                messages.push(
-                    "A continuación muestro tus últimos pagos de Spotify 🎶:",
-                );
-
-                lastUserPayments.forEach((paymentInfo) => {
-                    messages.push(
-                        `📅 ${paymentInfo.paymentDate.toLocaleDateString(
-                            "es-MX",
-                        )} - 💵 ${pesosFormatter.format(
-                            paymentInfo.payment,
-                        )} pesos - ⏳ ${paymentInfo.paidPeriods} meses pagados`,
-                    );
-                });
-            } else {
-                messages.push(
-                    "😰 Aún no has hecho ningún pago, si crees que esto es un error por favor avisame a mi numero personal!",
-                );
-            }
-            await flowDynamic(messages);
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
+const extractTandaFromCommandOrState = async (
+    ctx: BotContext,
+    state: { get: <T = unknown>(key: string) => T },
+    prefixRegex: RegExp,
+): Promise<Tanda | null> => {
+    const stateTandaName = state.get<string | undefined>("selectedTandaName");
+    if (stateTandaName) {
+        return getTandaByName(stateTandaName);
     }
-});
 
-export const maxStatusFlow = addKeyword<Provider, Database>(
-    BOT_COMMANDS.MY_HBO_MAX,
-).addAction(async (ctx, { flowDynamic }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-        const tanda = await getTandaByName(USER_GROUPS.MAX);
-        const currentDatetime = new Date();
-        const currentMonthTandaDate = new Date(
-            Date.UTC(
-                currentDatetime.getFullYear(),
-                currentDatetime.getMonth(),
-                tanda.paymentDay.getDate() + 1,
-            ),
-        );
-        const messages: string[] = [];
-
-        if (isUserAllowed(user, [USER_GROUPS.MAX])) {
-            if (!hasUserAcceptedTandaTerms(USER_GROUPS.MAX, user)) {
-                await flowDynamic(
-                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(
-                        USER_GROUPS.MAX,
-                    ),
-                );
-                return;
-            }
-
-            logger.info(
-                `${user.name} is checking the status of their HBO Max payments`,
-            );
-
-            const lastUserPayments = await getLastUserTandaPayments(
-                user.id,
-                USER_GROUPS.MAX,
-            );
-
-            if (lastUserPayments.length > 0) {
-                if (lastUserPayments[0].nextPayment <= currentMonthTandaDate) {
-                    const missingPayments = await getUserMissingPayments(
-                        tanda,
-                        user,
-                        currentDatetime,
-                        tanda.suscriptionType as SUSCRIPTION_TYPES,
-                    );
-
-                    messages.push(
-                        `¡Este mes *necesitas realizar tu pago* de HBO Max 👀! Tienes pendientes ${missingPayments} pago${
-                            missingPayments > 1 ? "s" : ""
-                        }`,
-                    );
-                } else {
-                    messages.push(
-                        `¡Estas *al corriente* con tus pagos de HBO Max! 🎉 \nTu siguiente pago debe ser antes del *${lastUserPayments[0].nextPayment.toLocaleDateString(
-                            "es-MX",
-                        )}*`,
-                    );
-                }
-                messages.push(
-                    "A continuación muestro tus últimos pagos de HBO Max 🍿:",
-                );
-
-                lastUserPayments.forEach((paymentInfo) => {
-                    messages.push(
-                        `📅 ${paymentInfo.paymentDate.toLocaleDateString(
-                            "es-MX",
-                        )} - 💵 ${pesosFormatter.format(
-                            paymentInfo.payment,
-                        )} pesos - ⏳ ${paymentInfo.paidPeriods} mes${
-                            paymentInfo.paidPeriods > 1 ? "es" : ""
-                        } pagado${paymentInfo.paidPeriods > 1 ? "s" : ""}`,
-                    );
-                });
-            } else {
-                messages.push(
-                    "😰 Aún no has hecho ningún pago, si crees que esto es un error por favor avisame a mi numero personal!",
-                );
-            }
-            await flowDynamic(messages);
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
+    const match = prefixRegex.exec((ctx.body || "").trim());
+    if (match?.[1]) {
+        return getTandaByName(match[1].trim());
     }
-});
 
-export const amazonPrimeStatusFlow = addKeyword<Provider, Database>(
-    BOT_COMMANDS.MY_AMAZON,
-).addAction(async (ctx, { flowDynamic }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-        const tanda = await getTandaByName(USER_GROUPS.AMAZON_PRIME);
-        const currentDatetime = new Date();
-        const currentYearTandaDate = new Date(
-            Date.UTC(
-                currentDatetime.getFullYear(),
-                tanda.paymentDay.getMonth(),
-                tanda.paymentDay.getDate() + 1,
-            ),
-        );
-        const messages: string[] = [];
-
-        if (isUserAllowed(user, [USER_GROUPS.AMAZON_PRIME])) {
-            if (!hasUserAcceptedTandaTerms(USER_GROUPS.AMAZON_PRIME, user)) {
-                await flowDynamic(
-                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(
-                        USER_GROUPS.AMAZON_PRIME,
-                    ),
-                );
-                return;
-            }
-
-            logger.info(
-                `${user.name} is checking the status of their Amazon Prime payments`,
-            );
-
-            const lastUserPayments = await getLastUserTandaPayments(
-                user.id,
-                USER_GROUPS.AMAZON_PRIME,
-            );
-
-            if (lastUserPayments.length > 0) {
-                if (lastUserPayments[0].nextPayment <= currentYearTandaDate) {
-                    const missingPayments = await getUserMissingPayments(
-                        tanda,
-                        user,
-                        currentDatetime,
-                        tanda.suscriptionType as SUSCRIPTION_TYPES,
-                    );
-
-                    messages.push(
-                        `*Necesitas realizar tu pago* de Amazon Prime 👀! Tienes pendientes ${missingPayments} pago${
-                            missingPayments > 1 ? "s" : ""
-                        }`,
-                    );
-                } else {
-                    messages.push(
-                        `¡Estas *al corriente* con tu pago de Amazon Prime! 🎉\nTu siguiente pago debe ser antes del *${lastUserPayments[0].nextPayment.toLocaleDateString(
-                            "es-MX",
-                        )}*`,
-                    );
-                }
-                messages.push(
-                    "A continuación muestro tus últimos pagos de Amazon Prime 📦:",
-                );
-
-                lastUserPayments.forEach((paymentInfo) => {
-                    messages.push(
-                        `📅 ${paymentInfo.paymentDate.toLocaleDateString(
-                            "es-MX",
-                        )} - 💵 ${pesosFormatter.format(
-                            paymentInfo.payment,
-                        )} pesos`,
-                    );
-                });
-            } else {
-                messages.push(
-                    "😰 Aún no has hecho ningún pago, si crees que esto es un error por favor avisame a mi numero personal!",
-                );
-            }
-            await flowDynamic(messages);
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
-    }
-});
+    return null;
+};
 
 export const chrisPaymentInfoFlow = addKeyword<Provider, Database>(
     BOT_COMMANDS.PAYMENT_DETAILS,
-).addAction(async (ctx, { flowDynamic }) => {
+).addAction(async (ctx, { flowDynamic, provider }) => {
     try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
+        await withTyping(ctx, provider, async () => {
+            const user = await resolveUserFromContext(ctx);
 
-        if (
-            isUserAllowed(user, [
-                USER_GROUPS.SPOTIFY,
-                USER_GROUPS.AMAZON_PRIME,
-                USER_GROUPS.MAX,
-                USER_GROUPS.FAMILY,
-                USER_GROUPS.ADMIN,
-                USER_GROUPS.YOUTUBE_PREMIUM,
-            ])
-        ) {
-            const messages: string[] = [
-                "📄 Mis datos de pago:",
-                "👤 *Nombre*: Christian Alejandro Leyva Mercado",
-                "🏦 *Banco*: NU MEXICO",
-                "🔑 *CLABE*: 6381 8000 0110 380148",
-            ];
-
-            await flowDynamic(messages.join("\n"));
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
-    }
-});
-
-export const spotifyPaymentHandler = addKeyword(EVENTS.ACTION)
-    .addAnswer(
-        "💲 Escribe el monto *con unicamente numeros* del pago que realizaste (ej. `180` ó `40.5` ó `68.99` ó `20.00` ):",
-        { capture: true },
-        async (ctx, { flowDynamic, fallBack, state }) => {
-            try {
-                const paymentAmount = parseFloat(ctx.body);
-
-                if (isNaN(paymentAmount) || paymentAmount <= 0) {
-                    return fallBack(
-                        "El monto del pago debe estar escrito con *unicamente números* (ej. `180` ó `40.5` ó `68.99` ó `20.00` ).\nIntentalo de nuevo.",
-                    );
-                }
-
-                await state.update({ paymentAmount });
-
-                await flowDynamic(
-                    `¿El monto ${pesosFormatter.format(
-                        paymentAmount,
-                    )} es correcto?\n(si/no)`,
-                );
-            } catch (error) {
-                return fallBack(
-                    "😰 No pude entender el monto del pago, intentalo de nuevo",
-                );
-            }
-        },
-    )
-    .addAction(
-        { capture: true },
-        async (ctx, { flowDynamic, fallBack, state, gotoFlow }) => {
-            const message = ctx.body.toLowerCase();
-
-            if (message === "si") {
-                await flowDynamic(
-                    "Ahora por favor envia el comprobante de pago 📸",
-                );
-            } else if (message === "no") {
-                await state.clear();
-                return gotoFlow(spotifyPaymentHandler);
-            } else {
-                return fallBack("Por favor, escribe `si` o `no`");
-            }
-        },
-    )
-    .addAction(
-        { capture: true },
-        async (ctx, { flowDynamic, state, provider }) => {
-            try {
-                const messagePhoneNumber = getCleanPhoneNumber(
-                    ctx.key.remoteJid!,
-                );
-
-                const paymentAmount = state.get("paymentAmount");
-                const paymentDate = new Date();
-                const userFrom = ctx.from;
-                const user =
-                    (await getUserFromPhone(userFrom)) ||
-                    (await getUserFromPhone(messagePhoneNumber));
-
-                const voucherPath = await savePaymentPhoto(
-                    ctx,
-                    provider,
-                    user.id,
-                );
-
-                const payment: Payment = {
-                    paymentDate,
-                    amount: paymentAmount,
-                    user: user,
-                    tanda: USER_GROUPS.SPOTIFY,
-                    voucherPath,
-                };
-
-                const { paidPeriods, nextPayment } =
-                    await handleTandaPayment(payment);
-
-                await state.clear();
-
-                await flowDynamic(
-                    `¡Pago de ${toTitleCase(
-                        USER_GROUPS.SPOTIFY,
-                    )} 🎧 registrado correctamente! 🎉\n\n📅 *Fecha de pago*: ${paymentDate.toLocaleDateString(
-                        "es-MX",
-                    )}\n💵 *Monto*: ${pesosFormatter.format(
-                        paymentAmount,
-                    )} pesos\n⏳ *Meses pagados*: ${paidPeriods} (siguiente pago: ${nextPayment.toLocaleDateString(
-                        "es-MX",
-                    )})`,
-                );
-
-                // Resend the voucher to the admin
-                const messagesToAdmin: Message[] = [
-                    {
-                        body: voucherPath,
-                        type: "image",
-                        alt: `📸 Te comparto el comprobante de pago de *${
-                            user.name
-                        }* para ${toTitleCase(
-                            USER_GROUPS.SPOTIFY,
-                        )} por *💵 ${pesosFormatter.format(
-                            paymentAmount,
-                        )} pesos*`,
-                    },
+            if (isUserAllowed(user)) {
+                const messages: string[] = [
+                    "📄 Mis datos de pago:",
+                    "👤 *Nombre*: Christian Alejandro Leyva Mercado",
+                    "🏦 *Banco*: NU MEXICO",
+                    "🔑 *CLABE*: 6381 8000 0110 380148",
                 ];
 
-                await sendMessagesToUser(ADMIN_USER, messagesToAdmin);
-                logger.info(
-                    `${user.name} paid ${paidPeriods} months of Spotify`,
-                );
-            } catch (error) {
-                logger.error(error);
-                await flowDynamic(GENERIC_ERROR_MESSAGE);
+                await flowDynamic(messages.join("\n"));
+            } else {
+                await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
             }
-        },
-    );
-
-export const registerSpotifyPayment = addKeyword<Provider, Database>(
-    BOT_COMMANDS.PAY_SPOTIFY,
-).addAction(async (ctx, { flowDynamic, gotoFlow }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-
-        if (isUserAllowed(user, [USER_GROUPS.SPOTIFY])) {
-            if (!hasUserAcceptedTandaTerms(USER_GROUPS.SPOTIFY, user)) {
-                await flowDynamic(
-                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(
-                        USER_GROUPS.SPOTIFY,
-                    ),
-                );
-                return;
-            }
-
-            // TODO: Agregar el monto que debe pagar por mes a la persona, solo como recordatorio de cuanto debío pagar xd
-
-            logger.info(`${user.name} is making a payment for Spotify`);
-
-            return gotoFlow(spotifyPaymentHandler);
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
+        });
     } catch (error) {
         logger.error(error);
         await flowDynamic(GENERIC_ERROR_MESSAGE);
     }
 });
 
-export const maxPaymentHandler = addKeyword(EVENTS.ACTION)
+export const acceptTermsHandler = addKeyword<Provider, Database>(EVENTS.ACTION)
+    .addAction(async (ctx, { gotoFlow }) => {
+        startIdle(ctx, gotoFlow);
+    })
     .addAnswer(
-        "💲 Escribe el monto *con unicamente numeros* del pago que realizaste (ej. `180` ó `40.5` ó `68.99` ó `20.00` ):",
+        withCancelInstruction(
+            "Para aceptar el reglamento, escribe *ACEPTO*. De lo contrario, envía *NO ACEPTO* y contacta con mi número personal para aclarar dudas.",
+        ),
         { capture: true },
-        async (ctx, { flowDynamic, fallBack, state }) => {
-            try {
-                const paymentAmount = parseFloat(ctx.body);
+        async (ctx, { flowDynamic, fallBack, endFlow, state, provider }) => {
+            stopIdle(ctx);
+            const userResponse = (ctx.body || "").trim();
 
-                if (isNaN(paymentAmount) || paymentAmount <= 0) {
-                    return fallBack(
-                        "El monto del pago debe estar escrito con *unicamente números* (ej. `180` ó `40.5` ó `68.99` ó `20.00` ).\nIntentalo de nuevo.",
-                    );
-                }
+            if (isCancelCommand(userResponse)) {
+                await state.clear();
+                return endFlow(OPERATION_CANCELLED_MESSAGE);
+            }
 
-                await state.update({ paymentAmount });
-
-                await flowDynamic(
-                    `¿El monto ${pesosFormatter.format(
-                        paymentAmount,
-                    )} es correcto?\n(si/no)`,
+            if (userResponse.toUpperCase() === "NO ACEPTO") {
+                await state.clear();
+                return endFlow(
+                    "Entendido, si tienes alguna duda por favor contáctame a mi número personal.",
                 );
-            } catch (error) {
+            }
+
+            if (userResponse.toUpperCase() !== "ACEPTO") {
                 return fallBack(
-                    "😰 No pude entender el monto del pago, intentalo de nuevo",
-                );
-            }
-        },
-    )
-    .addAction(
-        { capture: true },
-        async (ctx, { flowDynamic, fallBack, state, gotoFlow }) => {
-            const message = ctx.body.toLowerCase();
-
-            if (message === "si") {
-                await flowDynamic(
-                    "Ahora por favor envia el comprobante de pago 📸",
-                );
-            } else if (message === "no") {
-                await state.clear();
-                return gotoFlow(maxPaymentHandler);
-            } else {
-                return fallBack("Por favor, escribe `si` o `no`");
-            }
-        },
-    )
-    .addAction(
-        { capture: true },
-        async (ctx, { flowDynamic, state, provider }) => {
-            try {
-                const messagePhoneNumber = getCleanPhoneNumber(
-                    ctx.key.remoteJid!,
-                );
-
-                const paymentAmount = state.get("paymentAmount");
-                const paymentDate = new Date();
-                const userFrom = ctx.from;
-                const user =
-                    (await getUserFromPhone(userFrom)) ||
-                    (await getUserFromPhone(messagePhoneNumber));
-
-                const voucherPath = await savePaymentPhoto(
-                    ctx,
-                    provider,
-                    user.id,
-                );
-
-                const payment: Payment = {
-                    paymentDate,
-                    amount: paymentAmount,
-                    user: user,
-                    tanda: USER_GROUPS.MAX,
-                    voucherPath,
-                };
-
-                const { paidPeriods, nextPayment } =
-                    await handleTandaPayment(payment);
-
-                await state.clear();
-
-                await flowDynamic(
-                    `¡Pago de ${toTitleCase(
-                        USER_GROUPS.MAX,
-                    )} 🍿 registrado correctamente! 🎉\n\n📅 *Fecha de pago*: ${paymentDate.toLocaleDateString(
-                        "es-MX",
-                    )}\n💵 *Monto*: ${pesosFormatter.format(
-                        paymentAmount,
-                    )} pesos\n⏳ *Meses pagados*: ${paidPeriods} (siguiente pago: ${nextPayment.toLocaleDateString(
-                        "es-MX",
-                    )})`,
-                );
-
-                // Resend the voucher to the admin
-                const messagesToAdmin: Message[] = [
-                    {
-                        body: voucherPath,
-                        type: "image",
-                        alt: `📸 Te comparto el comprobante de pago de *${
-                            user.name
-                        }* para ${toTitleCase(
-                            USER_GROUPS.MAX,
-                        )} por *💵 ${pesosFormatter.format(
-                            paymentAmount,
-                        )} pesos*`,
-                    },
-                ];
-
-                await sendMessagesToUser(ADMIN_USER, messagesToAdmin);
-                logger.info(
-                    `${user.name} paid ${paidPeriods} months of HBO Max`,
-                );
-            } catch (error) {
-                logger.error(error);
-                await flowDynamic(GENERIC_ERROR_MESSAGE);
-            }
-        },
-    );
-
-export const registerMaxPayment = addKeyword<Provider, Database>(
-    BOT_COMMANDS.PAY_HBO_MAX,
-).addAction(async (ctx, { flowDynamic, gotoFlow }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-
-        if (isUserAllowed(user, [USER_GROUPS.MAX])) {
-            if (!hasUserAcceptedTandaTerms(USER_GROUPS.MAX, user)) {
-                await flowDynamic(
-                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(
-                        USER_GROUPS.MAX,
+                    withCancelInstruction(
+                        "Respuesta no válida. Por favor escribe *ACEPTO* o *NO ACEPTO*.",
                     ),
                 );
-                return;
             }
 
-            logger.info(`${user.name} is making a payment for HBO Max`);
-
-            return gotoFlow(maxPaymentHandler);
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
-    }
-});
-
-export const amazonPaymentHandler = addKeyword(EVENTS.ACTION)
-    .addAnswer(
-        "💲 Escribe el monto *con unicamente numeros* del pago que realizaste (ej. `180` ó `40.5` ó `68.99` ó `20.00` ):",
-        { capture: true },
-        async (ctx, { flowDynamic, fallBack, state }) => {
             try {
-                const paymentAmount = parseFloat(ctx.body);
+                await withTyping(ctx, provider, async () => {
+                    const user = await resolveUserFromContext(ctx);
+                    const tandaId = state.get<string>("tandaIdToAcceptTerms");
+                    const tandaName = state.get<string>("tandaToAcceptTerms");
 
-                if (isNaN(paymentAmount) || paymentAmount <= 0) {
-                    return fallBack(
-                        "El monto del pago debe estar escrito con *unicamente números* (ej. `180` ó `40.5` ó `68.99` ó `20.00` ).\nIntentalo de nuevo.",
+                    if (!user || !tandaId || !tandaName) {
+                        await flowDynamic(GENERIC_ERROR_MESSAGE);
+                        return;
+                    }
+
+                    await upsertUserTandaLegal({
+                        userId: user.id,
+                        userName: user.name,
+                        tandaId,
+                        tandaName,
+                        acceptedRules: true,
+                    });
+
+                    await state.clear();
+                    await flowDynamic(
+                        `¡Gracias por aceptar el reglamento de *${tandaName}*! 🎉 Ya puedes usar \`pagar ${tandaName.toLowerCase()}\` y \`mi ${tandaName.toLowerCase()}\`.`,
                     );
-                }
-
-                await state.update({ paymentAmount });
-
-                await flowDynamic(
-                    `¿El monto ${pesosFormatter.format(
-                        paymentAmount,
-                    )} es correcto?\n(si/no)`,
-                );
-            } catch (error) {
-                return fallBack(
-                    "😰 No pude entender el monto del pago, intentalo de nuevo",
-                );
-            }
-        },
-    )
-    .addAction(
-        { capture: true },
-        async (ctx, { flowDynamic, fallBack, state, gotoFlow }) => {
-            const message = ctx.body.toLowerCase();
-
-            if (message === "si") {
-                await flowDynamic(
-                    "Ahora por favor envia el comprobante de pago 📸",
-                );
-            } else if (message === "no") {
-                await state.clear();
-                return gotoFlow(amazonPaymentHandler);
-            } else {
-                return fallBack("Por favor, escribe `si` o `no`");
-            }
-        },
-    )
-    .addAction(
-        { capture: true },
-        async (ctx, { flowDynamic, state, provider }) => {
-            try {
-                const messagePhoneNumber = getCleanPhoneNumber(
-                    ctx.key.remoteJid!,
-                );
-                const paymentAmount = state.get("paymentAmount");
-                const paymentDate = new Date();
-                const userFrom = ctx.from;
-                const user =
-                    (await getUserFromPhone(userFrom)) ||
-                    (await getUserFromPhone(messagePhoneNumber));
-
-                const voucherPath = await savePaymentPhoto(
-                    ctx,
-                    provider,
-                    user.id,
-                );
-
-                const payment: Payment = {
-                    paymentDate,
-                    amount: paymentAmount,
-                    user: user,
-                    tanda: USER_GROUPS.AMAZON_PRIME,
-                    voucherPath,
-                };
-
-                const { nextPayment, paidPeriods } =
-                    await handleTandaPayment(payment);
-
-                await state.clear();
-
-                await flowDynamic(
-                    `¡Pago de ${toTitleCase(
-                        USER_GROUPS.AMAZON_PRIME,
-                    )} 📦 registrado correctamente! 🎉\n\n📅 *Fecha de pago*: ${paymentDate.toLocaleDateString(
-                        "es-MX",
-                    )}\n💵 *Monto*: ${pesosFormatter.format(
-                        paymentAmount,
-                    )} pesos\n⏳ *Años pagados*: ${paidPeriods} (siguiente pago: ${nextPayment.toLocaleDateString(
-                        "es-MX",
-                    )})`,
-                );
-
-                // Resend the voucher to the admin
-                const messagesToAdmin: Message[] = [
-                    {
-                        body: voucherPath,
-                        type: "image",
-                        alt: `📸 Te comparto el comprobante de pago de *${
-                            user.name
-                        }* para ${toTitleCase(
-                            USER_GROUPS.AMAZON_PRIME,
-                        )} por *💵 ${pesosFormatter.format(
-                            paymentAmount,
-                        )} pesos*`,
-                    },
-                ];
-
-                await sendMessagesToUser(ADMIN_USER, messagesToAdmin);
-                logger.info(
-                    `${user.name} paid ${paidPeriods} years of Amazon Prime`,
-                );
-            } catch (error) {
-                logger.error(error);
-                await flowDynamic(GENERIC_ERROR_MESSAGE);
-            }
-        },
-    );
-
-export const registerAmazonPayment = addKeyword<Provider, Database>(
-    BOT_COMMANDS.PAY_AMAZON,
-).addAction(async (ctx, { flowDynamic, gotoFlow }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-
-        if (isUserAllowed(user, [USER_GROUPS.AMAZON_PRIME])) {
-            if (!hasUserAcceptedTandaTerms(USER_GROUPS.AMAZON_PRIME, user)) {
-                await flowDynamic(
-                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(
-                        USER_GROUPS.AMAZON_PRIME,
-                    ),
-                );
-                return;
-            }
-
-            logger.info(`${user.name} is making a payment for Amazon Prime`);
-
-            return gotoFlow(amazonPaymentHandler);
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
-    }
-});
-
-export const acceptTermsHandler = addKeyword(EVENTS.ACTION).addAnswer(
-    `👀 ¿Aceptas las reglas de la tanda? (si/no)`,
-    { capture: true },
-    async (ctx, { flowDynamic, fallBack, state }) => {
-        try {
-            const message = ctx.body.toLowerCase();
-            const userPhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-            const user = await getUserFromPhone(userPhoneNumber);
-            const tanda = state.get("tandaToAcceptTerms");
-
-            if (message === "si") {
-                await userAcceptTandaTermsHandler(tanda, user);
-                await flowDynamic(
-                    "Perfecto, has aceptado las reglas de la tanda 🎉. Ahora puedes usar las funciones de la tanda!",
-                );
-                state.clear();
-            } else if (message === "no") {
-                await flowDynamic(
-                    "Oh no 😢, si tienes alguna duda con las reglas o ya no quieres formar parte de la tanda, *por favor avisame a mi número personal*.\nSi cambias de opinión puedes aceptar las reglas en cualquier momento 🙂.",
-                );
-                state.clear();
-            } else {
-                return fallBack("Por favor, escribe `si` o `no`");
-            }
-        } catch (error) {
-            return fallBack(
-                "😰 Algo falló al intentar aceptar las reglas. Intentalo de nuevo.\nSi el error persiste por favor reportamelo a mi número personal 🙏🏼",
-            );
-        }
-    },
-);
-
-export const spotifyRulesFlow = addKeyword<Provider, Database>(
-    BOT_COMMANDS.SPOTIFY_RULES,
-).addAction(async (ctx, { flowDynamic, gotoFlow, state }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-
-        if (isUserAllowed(user, [USER_GROUPS.SPOTIFY, USER_GROUPS.ADMIN])) {
-            const tanda = await getTandaByName(USER_GROUPS.SPOTIFY);
-
-            const messages = generateSpotifyRulesMessage(tanda);
-
-            await flowDynamic(messages.join("\n"));
-
-            if (
-                user.id !== "admin" &&
-                !hasUserAcceptedTandaTerms(USER_GROUPS.SPOTIFY, user)
-            ) {
-                await state.update({ tandaToAcceptTerms: USER_GROUPS.SPOTIFY });
-                return gotoFlow(acceptTermsHandler);
-            }
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
-    }
-});
-
-export const maxRulesFlow = addKeyword<Provider, Database>(
-    BOT_COMMANDS.HBO_MAX_RULES,
-).addAction(async (ctx, { flowDynamic, gotoFlow, state }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-
-        if (isUserAllowed(user, [USER_GROUPS.MAX, USER_GROUPS.ADMIN])) {
-            const tanda = await getTandaByName(USER_GROUPS.MAX);
-
-            const messages: string[] = generateHBOMaxRulesMessage(tanda);
-
-            await flowDynamic(messages.join("\n"));
-
-            if (
-                user.id !== "admin" &&
-                !hasUserAcceptedTandaTerms(USER_GROUPS.MAX, user)
-            ) {
-                await state.update({ tandaToAcceptTerms: USER_GROUPS.MAX });
-                return gotoFlow(acceptTermsHandler);
-            }
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
-    }
-});
-
-export const amazonPrimeRulesFlow = addKeyword<Provider, Database>(
-    BOT_COMMANDS.AMAZON_PRIME_RULES,
-).addAction(async (ctx, { flowDynamic, gotoFlow, state }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-
-        if (
-            isUserAllowed(user, [USER_GROUPS.AMAZON_PRIME, USER_GROUPS.ADMIN])
-        ) {
-            const tanda = await getTandaByName(USER_GROUPS.AMAZON_PRIME);
-
-            const messages = generateAmazonPrimeRulesMessage(tanda);
-
-            await flowDynamic(messages.join("\n"));
-
-            if (
-                user.id !== "admin" &&
-                !hasUserAcceptedTandaTerms(USER_GROUPS.AMAZON_PRIME, user)
-            ) {
-                await state.update({
-                    tandaToAcceptTerms: USER_GROUPS.AMAZON_PRIME,
                 });
-                return gotoFlow(acceptTermsHandler);
-            }
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
-    }
-});
-
-// Youtube Premium
-
-export const registerYoutubePremiumPayment = addKeyword<Provider, Database>(
-    BOT_COMMANDS.PAY_YOUTUBE,
-).addAction(async (ctx, { flowDynamic, gotoFlow }) => {
-    const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-    const userFrom = ctx.from;
-    const user =
-        (await getUserFromPhone(userFrom)) ||
-        (await getUserFromPhone(messagePhoneNumber));
-
-    try {
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-
-        if (isUserAllowed(user, [USER_GROUPS.YOUTUBE_PREMIUM])) {
-            if (!hasUserAcceptedTandaTerms(USER_GROUPS.YOUTUBE_PREMIUM, user)) {
-                await flowDynamic(
-                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(
-                        USER_GROUPS.YOUTUBE_PREMIUM,
-                    ),
-                );
-                return;
-            }
-
-            logger.info(`${user.name} is making a payment for Youtube Premium`);
-
-            return gotoFlow(youtubePremiumPaymentHandler);
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
-    }
-});
-
-export const youtubePremiumPaymentHandler = addKeyword(EVENTS.ACTION)
-    .addAnswer(
-        "💲 Escribe el monto *con unicamente numeros* del pago que realizaste (ej. `180` ó `40.5` ó `68.99` ó `20.00` ):",
-        { capture: true },
-        async (ctx, { flowDynamic, fallBack, state }) => {
-            try {
-                const paymentAmount = parseFloat(ctx.body);
-
-                if (isNaN(paymentAmount) || paymentAmount <= 0) {
-                    return fallBack(
-                        "El monto del pago debe estar escrito con *unicamente números* (ej. `180` ó `40.5` ó `68.99` ó `20.00` ).\nIntentalo de nuevo.",
-                    );
-                }
-
-                await state.update({ paymentAmount });
-
-                await flowDynamic(
-                    `¿El monto ${pesosFormatter.format(
-                        paymentAmount,
-                    )} es correcto?\n(si/no)`,
-                );
-            } catch (error) {
-                return fallBack(
-                    "😰 No pude entender el monto del pago, intentalo de nuevo",
-                );
-            }
-        },
-    )
-    .addAction(
-        { capture: true },
-        async (ctx, { flowDynamic, fallBack, state, gotoFlow }) => {
-            const message = ctx.body.toLowerCase();
-
-            if (message === "si") {
-                await flowDynamic(
-                    "Ahora por favor envia el comprobante de pago 📸",
-                );
-            } else if (message === "no") {
-                await state.clear();
-                return gotoFlow(youtubePremiumPaymentHandler);
-            } else {
-                return fallBack("Por favor, escribe `si` o `no`");
-            }
-        },
-    )
-    .addAction(
-        { capture: true },
-        async (ctx, { flowDynamic, state, provider }) => {
-            const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-            const userFrom = ctx.from;
-            const user =
-                (await getUserFromPhone(userFrom)) ||
-                (await getUserFromPhone(messagePhoneNumber));
-
-            const paymentAmount: number = state.get("paymentAmount");
-            const paymentDate = new Date();
-
-            try {
-                const userFrom = ctx.from;
-                const user =
-                    (await getUserFromPhone(userFrom)) ||
-                    (await getUserFromPhone(messagePhoneNumber));
-
-                const voucherPath = await savePaymentPhoto(
-                    ctx,
-                    provider,
-                    user.id,
-                );
-
-                const payment: Payment = {
-                    paymentDate,
-                    amount: paymentAmount,
-                    user: user,
-                    tanda: USER_GROUPS.YOUTUBE_PREMIUM,
-                    voucherPath,
-                };
-
-                const { paidPeriods, nextPayment } =
-                    await handleTandaPayment(payment);
-
-                await state.clear();
-
-                await flowDynamic(
-                    `¡Pago de ${toTitleCase(
-                        USER_GROUPS.YOUTUBE_PREMIUM,
-                    )} 🎥 registrado correctamente! 🎉\n\n📅 *Fecha de pago*: ${paymentDate.toLocaleDateString(
-                        "es-MX",
-                    )}\n💵 *Monto*: ${pesosFormatter.format(
-                        paymentAmount,
-                    )} pesos\n⏳ *Meses pagados*: ${paidPeriods} (siguiente pago: ${nextPayment.toLocaleDateString(
-                        "es-MX",
-                    )})`,
-                );
-
-                // Resend the voucher to the admin
-                const messagesToAdmin: Message[] = [
-                    {
-                        body: voucherPath,
-                        type: "image",
-                        alt: `📸 Te comparto el comprobante de pago de *${
-                            user.name
-                        }* para ${toTitleCase(
-                            USER_GROUPS.YOUTUBE_PREMIUM,
-                        )} por *💵 ${pesosFormatter.format(
-                            paymentAmount,
-                        )} pesos*`,
-                    },
-                ];
-
-                await sendMessagesToUser(ADMIN_USER, messagesToAdmin);
-                logger.info(
-                    `${user.name} paid ${paidPeriods} months of Youtube Premium`,
-                );
             } catch (error) {
                 logger.error(error);
                 await flowDynamic(GENERIC_ERROR_MESSAGE);
@@ -1081,130 +142,332 @@ export const youtubePremiumPaymentHandler = addKeyword(EVENTS.ACTION)
         },
     );
 
-export const youtubeRulesFlow = addKeyword<Provider, Database>(
-    BOT_COMMANDS.YOUTUBE_PREMIUM_RULES,
-).addAction(async (ctx, { flowDynamic, gotoFlow, state }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-
-        if (
-            isUserAllowed(user, [
-                USER_GROUPS.YOUTUBE_PREMIUM,
-                USER_GROUPS.ADMIN,
-            ])
-        ) {
-            const tanda = await getTandaByName(USER_GROUPS.YOUTUBE_PREMIUM);
-
-            const messages = generateYoutubePremiumRulesMessage(tanda);
-
-            await flowDynamic(messages.join("\n"));
-
-            if (
-                user.id !== "admin" &&
-                !hasUserAcceptedTandaTerms(USER_GROUPS.YOUTUBE_PREMIUM, user)
-            ) {
-                await state.update({
-                    tandaToAcceptTerms: USER_GROUPS.YOUTUBE_PREMIUM,
-                });
-                return gotoFlow(acceptTermsHandler);
+export const tandaPaymentHandler = addKeyword<Provider, Database>(EVENTS.ACTION)
+    .addAction(async (ctx, { gotoFlow }) => {
+        startIdle(ctx, gotoFlow);
+    })
+    .addAnswer(
+        withCancelInstruction(
+            "💲 Escribe el monto *únicamente con números* del pago que realizaste (ej. `180` o `40.50`):",
+        ),
+        { capture: true },
+        async (ctx, { fallBack, endFlow, state, gotoFlow }) => {
+            if (isCancelCommand(ctx.body)) {
+                stopIdle(ctx);
+                await state.clear();
+                return endFlow(OPERATION_CANCELLED_MESSAGE);
             }
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
-    } catch (error) {
-        logger.error(error);
-        await flowDynamic(GENERIC_ERROR_MESSAGE);
-    }
-});
 
-export const youtubePremiumStatusFlow = addKeyword<Provider, Database>(
-    BOT_COMMANDS.MY_YOUTUBE,
-).addAction(async (ctx, { flowDynamic }) => {
-    try {
-        const messagePhoneNumber = getCleanPhoneNumber(ctx.key.remoteJid!);
-        const userFrom = ctx.from;
-        const user =
-            (await getUserFromPhone(userFrom)) ||
-            (await getUserFromPhone(messagePhoneNumber));
-        const tanda = await getTandaByName(USER_GROUPS.YOUTUBE_PREMIUM);
-        const currentDatetime = new Date();
-        const currentMonthTandaDate = new Date(
-            Date.UTC(
-                currentDatetime.getFullYear(),
-                currentDatetime.getMonth(),
-                tanda.paymentDay.getDate() + 1,
-            ),
-        );
-        const messages: string[] = [];
+            const cleaned = (ctx.body || "").replace(/[$,\s]/g, "");
+            const amount = Number(cleaned);
 
-        if (isUserAllowed(user, [USER_GROUPS.YOUTUBE_PREMIUM])) {
-            if (!hasUserAcceptedTandaTerms(USER_GROUPS.YOUTUBE_PREMIUM, user)) {
-                await flowDynamic(
-                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(
-                        USER_GROUPS.YOUTUBE_PREMIUM,
+            if (!cleaned || Number.isNaN(amount) || amount <= 0) {
+                resetIdle(ctx, gotoFlow);
+                return fallBack(
+                    withCancelInstruction(
+                        "❌ Ingresaste un monto inválido. Escribe únicamente números mayores a 0 (ej. `40` o `40.50`):",
                     ),
                 );
-                return;
             }
 
-            logger.info(
-                `${user.name} is checking the status of their Youtube Premium payments`,
+            resetIdle(ctx, gotoFlow);
+            await state.update({ amount });
+        },
+    )
+    .addAnswer(
+        withCancelInstruction(
+            "🧾 Ahora envía la *foto o archivo (PDF)* de tu comprobante de pago:",
+        ),
+        { capture: true },
+        async (ctx, { flowDynamic, fallBack, endFlow, provider, state, gotoFlow }) => {
+            if (isCancelCommand(ctx.body)) {
+                stopIdle(ctx);
+                await state.clear();
+                return endFlow(OPERATION_CANCELLED_MESSAGE);
+            }
+
+            const hasMedia = Boolean(
+                ctx.message?.imageMessage || ctx.message?.documentMessage,
             );
 
-            const lastUserPayments = await getLastUserTandaPayments(
-                user.id,
-                USER_GROUPS.YOUTUBE_PREMIUM,
-            );
+            if (!hasMedia) {
+                resetIdle(ctx, gotoFlow);
+                return fallBack(
+                    withCancelInstruction(
+                        "❌ No detecté una imagen o archivo PDF. Por favor envía la foto o documento de tu comprobante:",
+                    ),
+                );
+            }
 
-            if (lastUserPayments.length > 0) {
-                if (lastUserPayments[0].nextPayment <= currentMonthTandaDate) {
-                    const missingPayments = await getUserMissingPayments(
-                        tanda,
+            stopIdle(ctx);
+
+            try {
+                await withTyping(ctx, provider, async () => {
+                    const user = await resolveUserFromContext(ctx);
+                    const tandaName = state.get<string>("paymentTandaName");
+                    const amount = state.get<number>("amount");
+
+                    if (!user || !tandaName || !amount) {
+                        await flowDynamic(GENERIC_ERROR_MESSAGE);
+                        return;
+                    }
+
+                    const voucherPath = await savePaymentPhoto(
+                        ctx,
+                        provider,
+                        user.id,
+                    );
+
+                    const payment: Payment = {
+                        paymentDate: new Date(),
+                        amount,
                         user,
-                        currentDatetime,
-                        tanda.suscriptionType as SUSCRIPTION_TYPES,
+                        tanda: tandaName,
+                        voucherPath,
+                    };
+
+                    const {
+                        paidPeriods,
+                        nextPayment,
+                        newCreditBalance,
+                        tandaInfo,
+                    } = await handleTandaPayment(payment);
+
+                    const periodUnit =
+                        tandaInfo.suscriptionType === SUSCRIPTION_TYPES.ANNUAL
+                            ? paidPeriods === 1
+                                ? "año"
+                                : "años"
+                            : paidPeriods === 1
+                              ? "mes"
+                              : "meses";
+
+                    logger.info(
+                        `${user.name} paid ${pesosFormatter.format(amount)} -> ${paidPeriods} ${periodUnit} of ${tandaInfo.name} (credit: ${newCreditBalance})`,
                     );
 
-                    messages.push(
-                        `¡Este mes *necesitas realizar tu pago* de Youtube Premium 👀! Tienes pendientes ${missingPayments} pago${
-                            missingPayments > 1 ? "s" : ""
-                        }`,
-                    );
-                } else {
-                    messages.push(
-                        `¡Estas *al corriente* con tus pagos de Youtube Premium! 🎉\nTu siguiente pago debe ser antes del *${lastUserPayments[0].nextPayment.toLocaleDateString(
-                            "es-MX",
-                        )}*`,
-                    );
-                }
-                messages.push(
-                    "A continuación muestro tus últimos pagos de Youtube Premium 🎥:",
-                );
+                    if (paidPeriods > 0) {
+                        await flowDynamic(
+                            `✅ ¡Listo! Se registró tu pago de *${pesosFormatter.format(amount)}* para *${tandaInfo.name}* (${paidPeriods} ${periodUnit}).\n📅 Tu próximo pago será el *${formatMexicoCityDate(nextPayment)}*.\n💰 Saldo a favor restante: *${pesosFormatter.format(newCreditBalance)}*.`,
+                        );
+                    } else {
+                        const missingForOne = Math.max(
+                            0,
+                            tandaInfo.costPerUser - newCreditBalance,
+                        );
+                        await flowDynamic(
+                            `✅ Se registró tu abono parcial de *${pesosFormatter.format(amount)}* para *${tandaInfo.name}*.\n💰 Tu saldo a favor acumulado es de *${pesosFormatter.format(newCreditBalance)}*.\nℹ️ Te faltan *${pesosFormatter.format(missingForOne)}* para completar 1 periodo (${pesosFormatter.format(tandaInfo.costPerUser)}).`,
+                        );
+                    }
 
-                lastUserPayments.forEach((paymentInfo) => {
-                    messages.push(
-                        `📅 ${paymentInfo.paymentDate.toLocaleDateString(
-                            "es-MX",
-                        )} - 💵 ${pesosFormatter.format(
-                            paymentInfo.payment,
-                        )} pesos - ⏳ ${paymentInfo.paidPeriods} mes${
-                            paymentInfo.paidPeriods > 1 ? "es" : ""
-                        } pagado${paymentInfo.paidPeriods > 1 ? "s" : ""}`,
-                    );
+                    await sendMessagesToAdmins([
+                        {
+                            body: `${user.name} realizó un pago de *${pesosFormatter.format(amount)}* para *${tandaInfo.name}* (${paidPeriods} ${periodUnit}, saldo a favor: ${pesosFormatter.format(newCreditBalance)}).`,
+                        },
+                        {
+                            type: "image",
+                            body: voucherPath,
+                            alt: `Comprobante de ${user.name} (${tandaInfo.name})`,
+                        },
+                    ]);
+
+                    await state.clear();
                 });
-            } else {
+            } catch (error) {
+                logger.error(error);
+                await state.clear();
+                await flowDynamic(GENERIC_ERROR_MESSAGE);
+            }
+        },
+    );
+
+export const tandaPaymentEntryFlow = addKeyword<Provider, Database>(
+    "^pagar\\s+(.+)$",
+    { regex: true },
+).addAction(async (ctx, { flowDynamic, gotoFlow, state, provider }) => {
+    try {
+        await withTyping(ctx, provider, async () => {
+            const user = await resolveUserFromContext(ctx);
+            const tanda = await extractTandaFromCommandOrState(
+                ctx,
+                state,
+                /^pagar\s+(.+)$/i,
+            );
+            await state.update({ selectedTandaName: undefined });
+
+            if (!tanda) {
+                await flowDynamic(
+                    "🤔 No encontré esa tanda. Envía `menú` para ver tus tandas disponibles.",
+                );
+                return;
+            }
+
+            if (!isUserAllowed(user, { tandaId: tanda.id })) {
+                await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
+                return;
+            }
+
+            if (!(await hasUserAcceptedTandaTerms(user!.id, tanda.id))) {
+                await flowDynamic(
+                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(tanda.name),
+                );
+                return;
+            }
+
+            logger.info(`${user!.name} is making a payment for ${tanda.name}`);
+            await state.update({ paymentTandaName: tanda.name });
+            return gotoFlow(tandaPaymentHandler);
+        });
+    } catch (error) {
+        logger.error(error);
+        await flowDynamic(GENERIC_ERROR_MESSAGE);
+    }
+});
+
+export const tandaStatusFlow = addKeyword<Provider, Database>(
+    "^mi\\s+(.+)$",
+    { regex: true },
+).addAction(async (ctx, { flowDynamic, state, provider }) => {
+    try {
+        await withTyping(ctx, provider, async () => {
+            const user = await resolveUserFromContext(ctx);
+            const tanda = await extractTandaFromCommandOrState(
+                ctx,
+                state,
+                /^mi\s+(.+)$/i,
+            );
+            await state.update({ selectedTandaName: undefined });
+
+            if (!tanda) {
+                await flowDynamic(
+                    "🤔 No encontré esa tanda. Envía `menú` para ver tus tandas disponibles.",
+                );
+                return;
+            }
+
+            if (!isUserAllowed(user, { tandaId: tanda.id })) {
+                await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
+                return;
+            }
+
+            if (!(await hasUserAcceptedTandaTerms(user!.id, tanda.id))) {
+                await flowDynamic(
+                    GENERIC_USER_HAS_NOT_ACCEPTED_TERMS_MESSAGE(tanda.name),
+                );
+                return;
+            }
+
+            const now = new Date();
+            const debt = await getUserDebtInfo(tanda, user!, now);
+            const messages: string[] = [];
+
+            const periodSingular =
+                tanda.suscriptionType === SUSCRIPTION_TYPES.ANNUAL
+                    ? "año"
+                    : "mes";
+            const periodPlural =
+                tanda.suscriptionType === SUSCRIPTION_TYPES.ANNUAL
+                    ? "años"
+                    : "meses";
+
+            if (debt.startDate) {
+                const tenure = getTenureText(debt.startDate, now);
                 messages.push(
-                    "😰 Aún no has hecho ningún pago, si crees que esto es un error por favor avisame a mi numero personal!",
+                    `📆 Estás en *${tanda.name}* desde el *${formatMexicoCityDate(debt.startDate)}* (llevas *${tenure}*).`,
                 );
             }
+
+            if (debt.missingPayments > 0) {
+                const unitCost = pesosFormatter.format(tanda.costPerUser);
+                const totalOwed = pesosFormatter.format(debt.totalAmountOwed);
+                const periodText =
+                    debt.missingPayments === 1 ? periodSingular : periodPlural;
+
+                messages.push(
+                    `👀 Tienes *${debt.missingPayments} ${periodText}* pendiente(s) en *${tanda.name}* (${debt.missingPayments} × ${unitCost}${
+                        debt.creditBalance > 0
+                            ? ` - ${pesosFormatter.format(debt.creditBalance)} de saldo a favor`
+                            : ""
+                    }).\n💵 *Total a pagar:* *${totalOwed} pesos*`,
+                );
+            } else if (debt.nextPayment) {
+                messages.push(
+                    `¡Estás *al corriente* con tus pagos de *${tanda.name}*! 🎉\n📅 Tu siguiente pago debe ser antes del *${formatMexicoCityDate(debt.nextPayment)}*`,
+                );
+            }
+
+            messages.push(
+                `💰 *Saldo a favor actual:* *${pesosFormatter.format(debt.creditBalance)} pesos*`,
+            );
+
+            if (debt.lastPayments.length > 0) {
+                const historyLines = [
+                    `A continuación muestro tus últimos pagos de *${tanda.name}*:`,
+                ];
+                debt.lastPayments.forEach((p) => {
+                    const periodsText =
+                        p.paidPeriods !== undefined
+                            ? `${p.paidPeriods} ${p.paidPeriods === 1 ? periodSingular : periodPlural}`
+                            : "-";
+                    historyLines.push(
+                        `📅 ${formatMexicoCityDate(p.paymentDate)} - 💵 ${pesosFormatter.format(p.payment)} - ⏳ ${periodsText}`,
+                    );
+                });
+                messages.push(historyLines.join("\n"));
+            } else {
+                messages.push(
+                    "ℹ️ Aún no tienes pagos registrados en esta tanda. Envía `pagar " +
+                        tanda.name.toLowerCase() +
+                        "` cuando realices tu transferencia.",
+                );
+            }
+
             await flowDynamic(messages);
-        } else {
-            await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
-        }
+        });
+    } catch (error) {
+        logger.error(error);
+        await flowDynamic(GENERIC_ERROR_MESSAGE);
+    }
+});
+
+export const tandaRulesFlow = addKeyword<Provider, Database>(
+    "^reglamento\\s+(.+)$",
+    { regex: true },
+).addAction(async (ctx, { flowDynamic, gotoFlow, state, provider }) => {
+    try {
+        await withTyping(ctx, provider, async () => {
+            const user = await resolveUserFromContext(ctx);
+            const tanda = await extractTandaFromCommandOrState(
+                ctx,
+                state,
+                /^reglamento\s+(.+)$/i,
+            );
+            await state.update({ selectedTandaName: undefined });
+
+            if (!tanda) {
+                await flowDynamic(
+                    "🤔 No encontré esa tanda. Envía `menú` para ver tus tandas disponibles.",
+                );
+                return;
+            }
+
+            if (!isUserAllowed(user, { tandaId: tanda.id })) {
+                await flowDynamic(GENERIC_NOT_AUTHORIZED_MESSAGE);
+                return;
+            }
+
+            const messages = generateTandaRulesMessages(tanda);
+            await flowDynamic(messages);
+
+            const accepted = await hasUserAcceptedTandaTerms(user!.id, tanda.id);
+            if (!accepted) {
+                await state.update({
+                    tandaIdToAcceptTerms: tanda.id,
+                    tandaToAcceptTerms: tanda.name,
+                });
+                return gotoFlow(acceptTermsHandler);
+            }
+        });
     } catch (error) {
         logger.error(error);
         await flowDynamic(GENERIC_ERROR_MESSAGE);

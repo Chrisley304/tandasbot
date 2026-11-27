@@ -1,32 +1,45 @@
-import { USER_GROUPS } from "@enums/users";
+import type { Tanda } from "@custom-types/notion/tandasDB";
+import type { User } from "@custom-types/notion/usersDB";
 
-export const userMenuOptions = {
-    [USER_GROUPS.ADMIN]: [
-        "- `mensaje a grupo` - Envia un mensaje a un grupo de usuarios 📬",
-        "- `mensaje personalizado` - Envia un mensaje personalizado a un usuario 📩",
-        '- `estatus tandas` - Muestra el estatus de las "tandas" 💸',
-        "- `reenviar recordatorios tandas` - Reenvia el recordatorio diario de las tandas a los usuarios 📢",
-    ],
-    [USER_GROUPS.ALL]: ["- `datos de pago` - Mostrar mis datos de pago 📄"],
-    [USER_GROUPS.SPOTIFY]: [
-        "- `pagar spotify` - Paga tu parte de Spotify 🎧",
-        "- `mi spotify` - Muestra tus pagos realizados o pendientes de tu tanda de Spotify 📆",
-        "- `reglamento spotify` - Muestra el reglamento de la tanda de Spotify 📜",
-    ],
-    [USER_GROUPS.MAX]: [
-        "- `pagar hbo max` - Paga tu parte de HBO Max 🍿",
-        "- `mi hbo max` - Muestra tus pagos realizados o pendientes de tu tanda de HBO Max 📆",
-        "- `reglamento hbo max` - Muestra el reglamento de la tanda de HBO Max 📜",
-    ],
-    [USER_GROUPS.YOUTUBE_PREMIUM]: [
-        "- `pagar youtube` - Paga tu parte de Youtube Premium 🎥",
-        "- `mi youtube` - Muestra tus pagos realizados o pendientes de tu tanda de Youtube Premium 📆",
-        "- `reglamento youtube premium` - Muestra el reglamento de la tanda de Youtube Premium 📜",
-    ],
-    [USER_GROUPS.AMAZON_PRIME]: [
-        "- `pagar amazon` - Paga tu parte de Amazon Prime 📦",
-        "- `mi amazon` - Muestra tus pagos realizados o pendientes de tu tanda de Amazon Prime 📆",
-        "- `reglamento amazon prime` - Muestra el reglamento de la tanda de Amazon 📜",
-    ],
-    [USER_GROUPS.FAMILY]: [],
+export const GENERAL_MENU_OPTIONS = [
+    "- `datos de pago` - Mostrar mis datos de pago 📄",
+];
+
+export const ADMIN_MENU_OPTIONS = [
+    "- `mensaje a grupo` - Envia un mensaje a una tanda o a `todos` 📬",
+    "- `mensaje personalizado` - Envia un mensaje personalizado a un usuario 📩",
+    '- `estatus tandas` - Muestra el estatus de las "tandas" 💸',
+    "- `reenviar recordatorios tandas` - Reenvia el recordatorio diario de las tandas a los usuarios 📢",
+    "- `adeudos usuario` - Consulta los últimos 3 pagos, saldo a favor y adeudo de un usuario 🔍",
+    "- `cambiar precio tanda` - Actualiza el costo de una tanda y ajusta pagos adelantados 💲",
+    "- `cambiar contraseña tanda` - Cambia la contraseña de una tanda y avisa a quienes están al corriente 🔐",
+];
+
+/**
+ * Generates dynamic menu lines for a given user and active tandas from Notion.
+ */
+export const generateUserMenuLines = (
+    user: User,
+    activeTandas: Tanda[],
+): string[] => {
+    const lines: string[] = [...GENERAL_MENU_OPTIONS];
+
+    const userTandas = activeTandas.filter((tanda) =>
+        user.tandaIds.includes(tanda.id),
+    );
+
+    for (const tanda of userTandas) {
+        const lowerName = tanda.name.toLowerCase();
+        lines.push(
+            `- \`pagar ${lowerName}\` - Paga tu parte de ${tanda.name}`,
+            `- \`mi ${lowerName}\` - Muestra tu antigüedad, saldo a favor y pagos de ${tanda.name}`,
+            `- \`reglamento ${lowerName}\` - Muestra el reglamento de ${tanda.name}`,
+        );
+    }
+
+    if (user.isAdmin) {
+        lines.push("", "*Opciones de Administrador:*", ...ADMIN_MENU_OPTIONS);
+    }
+
+    return lines;
 };
