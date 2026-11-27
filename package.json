@@ -1,6 +1,6 @@
 {
     "name": "tandasbot",
-    "version": "5.0.0",
+    "version": "5.0.1",
     "description": "Tandasbot is a Whatsapp bot dedicated to help you organize the tandas (groups of savings) among friends or family.",
     "main": "dist/app.js",
     "type": "module",
